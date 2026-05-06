@@ -9,6 +9,7 @@ import "../src/CovertBadges.sol";
  * @title GrantRolesTestnet
  * @notice Grants MODERATOR_ROLE on CovertProtocol AND mints MODERATOR_BADGE SBTs
  *         on CovertBadges for all three testnet moderator accounts.
+ *         Safe to re-run: skips mintBadge if the badge already exists.
  *
  * Required .env variables:
  *   PRIVATE_KEY         – deployer private key (must hold DEFAULT_ADMIN_ROLE)
@@ -22,6 +23,20 @@ import "../src/CovertBadges.sol";
 contract GrantRolesTestnet is Script {
     address constant PROTOCOL = 0x5B7AB21B2656BD187c3B544937eac9f36d901CbA;
     address constant BADGES   = 0x81ec2Fe3467535fd8e3A8a5bc00Bc226f2fedda4;
+
+    function grantModerator(CovertProtocol protocol, CovertBadges badges, address addr) internal {
+        // Grant role (idempotent — AccessControl ignores duplicate grants)
+        protocol.grantRole(protocol.MODERATOR_ROLE(), addr);
+
+        // Only mint badge if not already minted (tokenId 0 = none)
+        if (badges.badgeTokenId(addr, CovertBadges.BadgeType.MODERATOR_BADGE) == 0) {
+            badges.mintBadge(addr, CovertBadges.BadgeType.MODERATOR_BADGE);
+            console.log("[OK] Badge minted for:", addr);
+        } else {
+            console.log("[SKIP] Badge already exists for:", addr);
+        }
+        console.log("[OK] Role granted for:", addr);
+    }
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -38,20 +53,9 @@ contract GrantRolesTestnet is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // ── Moderator 1 ──
-        protocol.grantRole(protocol.MODERATOR_ROLE(), moderator1);
-        badges.mintBadge(moderator1, CovertBadges.BadgeType.MODERATOR_BADGE);
-        console.log("[OK] Moderator 1:", moderator1);
-
-        // ── Moderator 2 ──
-        protocol.grantRole(protocol.MODERATOR_ROLE(), moderator2);
-        badges.mintBadge(moderator2, CovertBadges.BadgeType.MODERATOR_BADGE);
-        console.log("[OK] Moderator 2:", moderator2);
-
-        // ── Moderator 3 ──
-        protocol.grantRole(protocol.MODERATOR_ROLE(), moderator3);
-        badges.mintBadge(moderator3, CovertBadges.BadgeType.MODERATOR_BADGE);
-        console.log("[OK] Moderator 3:", moderator3);
+        grantModerator(protocol, badges, moderator1);
+        grantModerator(protocol, badges, moderator2);
+        grantModerator(protocol, badges, moderator3);
 
         vm.stopBroadcast();
 

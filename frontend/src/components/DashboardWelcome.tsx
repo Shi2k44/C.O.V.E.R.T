@@ -9,7 +9,6 @@ import { useState, useEffect } from 'react';
 import {
   XMarkIcon,
   DocumentPlusIcon,
-  MagnifyingGlassIcon,
   ShieldCheckIcon,
   CurrencyDollarIcon,
   StarIcon,
@@ -56,36 +55,6 @@ const ROLE_CONTENT: Record<PlatformRole, { headline: string; subline: string; ca
         title: 'Reputation Score',
         description:
           'Your reputation grows with each verified report. Higher scores unlock reviewer privileges and increase your credibility weighting in future submissions.',
-      },
-    ],
-  },
-  reviewer: {
-    headline: 'Welcome, Reviewer',
-    subline: 'You hold a Reviewer Badge. You can evaluate reports submitted by others.',
-    cards: [
-      {
-        icon: <MagnifyingGlassIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
-        title: 'Review Reports',
-        description:
-          'Your dashboard shows all reports awaiting a reviewer decision. Read the encrypted summary, then mark each as Credible, Needs More Info, or Not Credible.',
-      },
-      {
-        icon: <DocumentPlusIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
-        title: 'Submit Your Own Reports',
-        description:
-          'Reviewers can also submit reports. However, your own submissions will not appear in your review queue — other reviewers handle those.',
-      },
-      {
-        icon: <CurrencyDollarIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
-        title: 'Earning COV Tokens',
-        description:
-          'Each completed review earns you COV tokens. Reviews that align with the final moderator decision earn a bonus. Consistent quality builds your reputation tier.',
-      },
-      {
-        icon: <StarIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
-        title: 'Review Requirements',
-        description:
-          'Every report needs at least 1 reviewer assessment before it can proceed to final moderation. Your vote is essential to the pipeline.',
       },
     ],
   },
