@@ -13,6 +13,7 @@ import {
   CurrencyDollarIcon,
   StarIcon,
   ChevronRightIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 import { PlatformRole, ROLE_LABELS } from '@/config/roles';
 
@@ -39,7 +40,7 @@ const ROLE_CONTENT: Record<PlatformRole, { headline: string; subline: string; ca
           'Use "Submit Report" to upload encrypted evidence. Your identity stays private via zero-knowledge proofs — only the content is verified on-chain.',
       },
       {
-        icon: <MagnifyingGlassIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
+        icon: <EyeIcon className="h-5 w-5" style={{ color: '#E84B1A' }} />,
         title: 'Track Your Submissions',
         description:
           'Visit "My Reports" to see the live status of every report: Pending → Under Review → Verified or Rejected.',
