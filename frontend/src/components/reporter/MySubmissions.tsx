@@ -21,16 +21,13 @@ import { ReportCard } from './ReportCard';
 import { mapApiReports } from '@/utils/reportMapper';
 import { useWeb3 } from '@/hooks/useWeb3';
 import { useReviewDecisionStore } from '@/stores/reviewDecisionStore';
-import { useCovBalanceStore, STAKE_AMOUNTS, PARTIAL_RETURN_RATE, FINAL_SETTLEMENT_RATE, type VisibilityKey } from '@/stores/covBalanceStore';
+import { useCovBalanceStore, STAKE_AMOUNTS, type VisibilityKey } from '@/stores/covBalanceStore';
 import { protocolService } from '@/services/protocol';
 import { STAKES } from '@/types/protocol';
 import { API_BASE } from '@/config';
 
 const STATUS_OPTIONS: { value: ReportStatus | ''; label: string }[] = [
   { value: '', label: 'All Status' },
-  { value: 'pending_review', label: 'Pending Review' },
-  { value: 'needs_evidence', label: 'Needs Evidence' },
-  { value: 'rejected_by_reviewer', label: 'Rejected by Reviewer' },
   { value: 'pending_moderation', label: 'Under Moderation' },
   { value: 'appealed', label: 'Appealed' },
   { value: 'verified', label: 'Verified' },
@@ -66,22 +63,7 @@ function applyStakeReturns(freshReports: Report[], walletAddress: string) {
   for (const report of freshReports) {
     const stakeAmount = STAKE_AMOUNTS[report.visibility as VisibilityKey] ?? 0;
 
-    // ── 25% partial return when reviewer passes the report to moderation ──
-    // Triggered when status moves to 'pending_moderation' (or legacy 'under_review').
-    const reviewerPassedStatuses: ReportStatus[] = ['pending_moderation', 'under_review'];
-    if (
-      reviewerPassedStatuses.includes(report.status) &&
-      !decStore.isPartialReturnApplied(report.id, addr)
-    ) {
-      const partialReturn = Math.floor(stakeAmount * PARTIAL_RETURN_RATE);
-      covStore.addBalance(addr, partialReturn);
-      decStore.markPartialReturnApplied(report.id, addr);
-      toast.success(`${partialReturn} COV returned — reviewer passed!`, {
-        id: `pr-${report.id}`,
-      });
-    }
-
-    // ── 75% final settlement when moderator has finalized the report ──
+    // ── Full stake settlement when moderator has finalized the report ──
     // Only triggered after moderator's final decision (verified or rejected).
     // 'disputed' is kept for legacy backward compat.
     const finalizedStatuses: ReportStatus[] = ['verified', 'rejected', 'disputed'];
@@ -90,11 +72,11 @@ function applyStakeReturns(freshReports: Report[], walletAddress: string) {
       !decStore.isFinalSettlementApplied(report.id, addr)
     ) {
       // rejected = FALSE_OR_MANIPULATED → stake slashed → 0 returned
-      // verified / disputed → remaining 75% returned to reporter
+      // verified / disputed → full stake returned to reporter
       const finalReturn =
         report.status === 'rejected'
           ? 0
-          : Math.floor(stakeAmount * FINAL_SETTLEMENT_RATE);
+          : stakeAmount;
 
       if (finalReturn > 0) covStore.addBalance(addr, finalReturn);
       decStore.markFinalSettlementApplied(report.id, addr);
@@ -378,9 +360,41 @@ export function MySubmissions() {
     }
   }, [fetchReports]);
 
+  const handleReAppeal = useCallback(async (report: Report) => {
+    const confirmed = window.confirm(
+      'Re-appeal this report? It will be sent to two different moderators for independent review. ' +
+      'If both moderators uphold the original decision, you will receive a penalty (−5 rep + strike). ' +
+      'If either disagrees, the original moderator will be penalised instead.'
+    );
+    if (!confirmed) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const walletAddress = walletState.address || localStorage.getItem('wallet_address') || '';
+      const res = await fetch(
+        `${API_BASE}/api/v1/reports/by-hash/${report.commitmentHash}/re-appeal`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+          },
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server returned ${res.status}`);
+      }
+      toast.success('Re-appeal submitted — awaiting two independent moderators');
+      fetchReports();
+    } catch (err) {
+      toast.error(`Re-appeal failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }, [walletState.address, fetchReports]);
+
   const handleResubmit = useCallback(async (report: Report) => {
     const confirmed = window.confirm(
-      'Resubmit this report for review? The reviewer\'s decision will be cleared and it will re-enter the review queue.'
+      'Resubmit this report for moderation? It will re-enter the moderation queue.'
     );
     if (!confirmed) return;
 
@@ -401,7 +415,7 @@ export function MySubmissions() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Server returned ${res.status}`);
       }
-      toast.success('Report resubmitted for review');
+      toast.success('Report resubmitted for moderation');
       fetchReports();
     } catch (err) {
       toast.error(`Resubmit failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -412,7 +426,10 @@ export function MySubmissions() {
 
   const stats = {
     total: reports.length,
-    pending: reports.filter((r) => r.status === 'pending_review' || r.status === 'pending').length,
+    pending: reports.filter((r) =>
+      r.status === 'pending_moderation' || r.status === 'pending' ||
+      r.status === 'appealed' || r.status === 'under_review'
+    ).length,
     verified: reports.filter((r) => r.status === 'verified').length,
     rejected: reports.filter((r) => r.status === 'rejected').length,
   };
@@ -641,8 +658,7 @@ export function MySubmissions() {
               report={report}
               onDelete={handleDeleteOne}
               onResubmit={
-                (report.status === 'needs_evidence' || report.status === 'rejected_by_reviewer') &&
-                !report.hasAppeal
+                report.status === 'needs_evidence' && !report.hasAppeal
                   ? handleResubmit
                   : undefined
               }
@@ -651,9 +667,13 @@ export function MySubmissions() {
                 report.reviewDecision !== undefined &&
                 report.reviewDecision !== 0 &&
                 !report.hasAppeal &&
-                (report.status === 'needs_evidence' || report.status === 'rejected_by_reviewer' ||
-                 report.status === 'rejected' || report.status === 'disputed')
+                (report.status === 'rejected' || report.status === 'disputed')
                   ? handleAppeal
+                  : undefined
+              }
+              onReAppeal={
+                (report.status === 'rejected') && !report.hasAppeal
+                  ? handleReAppeal
                   : undefined
               }
             />

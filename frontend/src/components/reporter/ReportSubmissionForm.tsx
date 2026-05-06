@@ -44,6 +44,26 @@ const CATEGORIES: { value: ReportCategory; label: string; description: string }[
   { value: 'other', label: 'Other', description: 'Other whistleblowing matters' },
 ];
 
+/**
+ * Bangalore government departments.
+ * These correspond to the Department rows seeded in migration 011.
+ * The `value` must match Department.name in the backend DB (case-insensitive).
+ */
+const BANGALORE_DEPARTMENTS: { value: string; label: string; description: string }[] = [
+  { value: 'Lokayukta Karnataka', label: 'Lokayukta Karnataka', description: 'Bribery, corruption & misconduct by government officials' },
+  { value: 'Cyber Crime Police', label: 'Cyber Crime Police (CID)', description: 'Online fraud, cybercrime, identity theft, hacking' },
+  { value: 'BBMP Roads', label: 'BBMP — Roads & Infrastructure', description: 'Potholes, broken roads, footpaths, dividers' },
+  { value: 'BWSSB', label: 'BWSSB — Water & Sewage', description: 'Water supply issues, pipe bursts, sewage overflow' },
+  { value: 'BESCOM', label: 'BESCOM — Electricity', description: 'Power cuts, streetlight failures, sparking wires' },
+  { value: 'KSPCB', label: 'KSPCB — Pollution Control', description: 'Air, water, noise or industrial pollution' },
+  { value: 'FSSAI Karnataka', label: 'FSSAI — Food Safety', description: 'Adulterated food, unhygienic restaurants, expired products' },
+  { value: 'BBMP Building Regulation', label: 'BBMP — Building Regulation', description: 'Illegal constructions, building code violations' },
+  { value: 'BBMP Public Health', label: 'BBMP — Public Health', description: 'Disease outbreaks, mosquito breeding, sanitation' },
+  { value: 'Bangalore Traffic Police', label: 'Bangalore Traffic Police', description: 'Traffic signal issues, illegal parking, accidents' },
+  { value: 'Bangalore City Police', label: 'Bangalore City Police', description: 'Harassment, theft, law & order issues' },
+  { value: 'BBMP Solid Waste', label: 'BBMP — Solid Waste Management', description: 'Garbage collection, illegal dumping, open burning' },
+];
+
 const VISIBILITY_OPTIONS: { value: ReportVisibility; label: string; description: string; icon: React.ElementType; stake: number }[] = [
   {
     value: 'private',
@@ -249,6 +269,7 @@ export function ReportSubmissionForm() {
           title: draft.title,
           description: draft.description,
           ...(draft.delayHours > 0 ? { delay_hours: draft.delayHours } : {}),
+          ...(draft.department ? { department: draft.department } : {}),
         }),
       });
 
@@ -335,26 +356,24 @@ export function ReportSubmissionForm() {
         console.warn('Failed to store encryption key:', error);
       }
 
-      // For PUBLIC and MODERATED reports: share the AES key with the backend so
-      // reviewers and moderators can decrypt the IPFS evidence bundle in-browser.
-      if (draft.visibility === 'public' || draft.visibility === 'moderated') {
-        try {
-          const keyHex = Array.from(encryptionKey)
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
-          const _ekToken = localStorage.getItem('token');
-          await fetch(`${API_BASE}/api/v1/reports/by-hash/${cidHash}/evidence-key`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(_ekToken ? { 'Authorization': `Bearer ${_ekToken}` } : {}),
-              ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
-            },
-            body: JSON.stringify({ key_hex: keyHex }),
-          });
-        } catch {
-          // Non-critical — evidence just won't be decryptable by reviewers
-        }
+      // Share the AES key with the backend for ALL visibilities so moderators
+      // can always decrypt evidence. Access is gated by moderator role in the API.
+      try {
+        const keyHex = Array.from(encryptionKey)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        const _ekToken = localStorage.getItem('token');
+        await fetch(`${API_BASE}/api/v1/reports/by-hash/${cidHash}/evidence-key`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(_ekToken ? { 'Authorization': `Bearer ${_ekToken}` } : {}),
+            ...(walletState.address ? { 'X-Wallet-Address': walletState.address } : {}),
+          },
+          body: JSON.stringify({ key_hex: keyHex }),
+        });
+      } catch {
+        // Non-critical — evidence just won't be decryptable by moderators
       }
 
       addReport({
@@ -557,8 +576,33 @@ export function ReportSubmissionForm() {
         </div>
       </div>
 
+      {/* Department Selection */}
+      <div>
+        <label className="block text-sm font-semibold text-neutral-300 mb-2">
+          Concerned Department <span className="text-neutral-500 font-normal">(optional — Bangalore)</span>
+        </label>
+        <p className="text-xs text-neutral-500 mb-3">
+          Select the government department your report is directed at. After a moderator approves your report, it will be forwarded to this department.
+        </p>
+        <select
+          value={draft.department}
+          onChange={(e) => updateDraft({ department: e.target.value })}
+          className="w-full px-4 py-3 border border-neutral-700 rounded-xl bg-neutral-900 text-white focus:outline-none focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500"
+        >
+          <option value="">-- Select department (optional) --</option>
+          {BANGALORE_DEPARTMENTS.map((dept) => (
+            <option key={dept.value} value={dept.value}>{dept.label}</option>
+          ))}
+        </select>
+        {draft.department && (
+          <p className="mt-2 text-xs text-neutral-500">
+            {BANGALORE_DEPARTMENTS.find(d => d.value === draft.department)?.description}
+          </p>
+        )}
+      </div>
+
       {/* Routing Preview */}
-      {(draft.title + draft.description).trim().length >= 20 && (
+      {!draft.department && (draft.title + draft.description).trim().length >= 20 && (
         <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
           <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
             Department Routing Preview
@@ -615,7 +659,7 @@ export function ReportSubmissionForm() {
           <div className="text-sm text-neutral-400">
             <p className="font-semibold text-white">Privacy Notice</p>
             <p className="mt-1.5 leading-relaxed">
-              Files are encrypted on your device before upload. For <span className="text-neutral-300">Public</span> and <span className="text-neutral-300">Moderated</span> reports, the encryption key is shared with the platform so reviewers and moderators can view attached evidence. <span className="text-neutral-300">Private</span> reports keep the key on your device only.
+              Files are encrypted on your device before upload. The encryption key is shared with the platform so moderators can view attached evidence when reviewing your report. Evidence is only visible to logged-in users on the public feed.
             </p>
           </div>
         </div>

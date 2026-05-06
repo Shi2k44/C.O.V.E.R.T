@@ -9,7 +9,6 @@ import { LandingPage } from './pages/LandingPage';
 import { ReporterDashboard } from './pages/ReporterDashboard';
 import { SubmitReport } from './pages/SubmitReport';
 import { MySubmissions } from './components/reporter/MySubmissions';
-import { ReviewerDashboard } from './pages/ReviewerDashboard';
 import { ProtocolModeratorDashboard } from './pages/ProtocolModeratorDashboard';
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { ReportDetailPage } from './pages/ReportDetailPage';
@@ -19,7 +18,7 @@ import { AccountabilityPage } from './pages/AccountabilityPage';
 
 /** Renders the role-appropriate dashboard at the single /dashboard route. */
 function DashboardPage() {
-  const { isReviewer, isModerator, loading } = useRoleAccess();
+  const { isModerator, loading } = useRoleAccess();
 
   if (loading) {
     return (
@@ -30,7 +29,6 @@ function DashboardPage() {
   }
 
   if (isModerator) return <ProtocolModeratorDashboard />;
-  if (isReviewer) return <ReviewerDashboard />;
   return <ReporterDashboard />;
 }
 
@@ -58,7 +56,7 @@ function App() {
           <Route path="/submit" element={<SubmitReport />} />
           <Route path="/my-reports" element={<MySubmissions />} />
 
-          {/* Legacy role-specific paths → unified dashboard */}
+          {/* Legacy paths → unified dashboard */}
           <Route path="/reviewer-dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/reviewer" element={<Navigate to="/dashboard" replace />} />
           <Route path="/moderator-dashboard" element={<Navigate to="/dashboard" replace />} />

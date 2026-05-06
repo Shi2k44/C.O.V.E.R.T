@@ -15,9 +15,10 @@ class ReportCreate(BaseModel):
     category: str = Field(..., description="Report category")
     visibility: int = Field(..., ge=0, le=2, description="0=private, 1=moderated, 2=public")
     size_bytes: int = Field(..., gt=0, description="Size of encrypted data")
-    title: Optional[str] = Field(None, max_length=500, description="Report title (plaintext for reviewer display)")
-    description: Optional[str] = Field(None, max_length=10000, description="Report description (plaintext for reviewer display)")
+    title: Optional[str] = Field(None, max_length=500, description="Report title (plaintext for moderator display)")
+    description: Optional[str] = Field(None, max_length=10000, description="Report description (plaintext for moderator display)")
     delay_hours: Optional[int] = Field(None, ge=0, le=72, description="Delay before blockchain submission (0/6/24/72 hours)")
+    department: Optional[str] = Field(None, max_length=200, description="User-selected Bangalore govt department for routing")
 
     @field_validator("cid")
     @classmethod
@@ -59,6 +60,7 @@ class ReportResponse(BaseModel):
     reviewed_at: Optional[datetime] = None
     scheduled_for: Optional[datetime] = None
     message: Optional[str] = None
+    department: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -79,10 +81,12 @@ class ReportListItem(BaseModel):
     risk_level: Optional[str] = None
     submitted_at: datetime
     reviewed_at: Optional[datetime] = None
-    # Only populated in the /all endpoint (reviewer/moderator access)
+    # Only populated in the /all endpoint (moderator access)
     reporter: Optional[str] = None
-    review_decision: Optional[str] = None  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM'
+    review_decision: Optional[str] = None
     final_label: Optional[str] = None  # 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED'
+    department: Optional[str] = None
+    appeal_round: Optional[int] = 0
 
     model_config = {"from_attributes": True}
 

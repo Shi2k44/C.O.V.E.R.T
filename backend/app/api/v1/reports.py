@@ -1,5 +1,9 @@
 """
 C.O.V.E.R.T - Reports API Endpoints
+
+Role model (v2 — no reviewers):
+  • Reporters   — submit & own reports
+  • Moderators  — see all reports, access all evidence, finalize decisions
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -34,7 +38,7 @@ from app.models.report import Report, ReportStatus, ReportVisibility
 from app.services.report_service import report_service
 from app.services.reputation_service import reputation_service
 from app.api.v1.auth import get_current_wallet
-from app.api.v1.rbac import require_reviewer_role, require_moderator_role
+from app.api.v1.rbac import require_moderator_role
 from app.core.config import settings
 from pydantic import BaseModel as PydanticBaseModel
 
@@ -62,7 +66,19 @@ class FinalizeBody(PydanticBaseModel):
     supporters: Optional[List[str]] = None  # wallet addresses that supported
     challengers: Optional[List[str]] = None # wallet addresses that challenged
     malicious_wallets: Optional[List[str]] = None  # wallets marked malicious by moderator
-    review_decision: Optional[str] = None   # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM' — reviewer's original decision
+    review_decision: Optional[str] = None   # kept for compat
+    moderator_address: Optional[str] = None # wallet of the finalising moderator
+
+
+class ReAppealBody(PydanticBaseModel):
+    """Body for filing a re-appeal on a rejected/needs-evidence report."""
+    reason: Optional[str] = None
+
+
+class AppealDecideBody(PydanticBaseModel):
+    """Body for a second-round appeal moderator decision."""
+    decision: str  # 'UPHOLD' | 'OVERTURN'
+
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -81,14 +97,11 @@ async def submit_report(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Submit a new encrypted report.
-
+    Submit a new encrypted report. Reports go directly to the moderation queue.
     Rate limited to RATE_LIMIT_SUBMISSIONS per hour (default: 10).
-    The slowapi limiter on app.state handles enforcement via Redis.
     """
     identifier = wallet
 
-    # Validate transaction hash format (tx_hash is optional — set later via /{id}/commit)
     if report_data.tx_hash and (not report_data.tx_hash.startswith("0x") or len(report_data.tx_hash) != 66):
         raise HTTPException(status_code=400, detail="Invalid transaction hash format")
 
@@ -107,7 +120,6 @@ async def submit_report(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Report already submitted")
 
-    # Create report
     try:
         report = await report_service.create_report(
             db=db,
@@ -121,6 +133,7 @@ async def submit_report(
             title=report_data.title,
             description=report_data.description,
             delay_hours=report_data.delay_hours,
+            department=report_data.department,
         )
 
         return ReportResponse(
@@ -136,6 +149,7 @@ async def submit_report(
             size_bytes=report.file_size,
             submitted_at=report.submission_timestamp,
             scheduled_for=report.scheduled_for,
+            department=report.department,
             message="Report submitted successfully"
         )
 
@@ -154,9 +168,7 @@ async def list_reports(
     wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    List user's submitted reports with optional filtering.
-    """
+    """List the authenticated user's own submitted reports."""
     identifier = wallet
 
     reports, total = await report_service.get_user_reports(
@@ -186,6 +198,8 @@ async def list_reports(
             reviewed_at=None,
             review_decision=r.review_decision,
             final_label=getattr(r, 'final_label', None),
+            department=r.department,
+            appeal_round=r.appeal_round or 0,
         )
         for r in reports
     ]
@@ -205,11 +219,13 @@ async def list_public_reports(
     category: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    List all public-visibility reports. No authentication required.
-    Shown to all users on the reporter dashboard as a community feed.
+    List public-visibility reports for logged-in users.
+    Authentication required — public reports are only shown to wallet holders.
+    Private reports are never returned here.
     """
     reports, total = await report_service.get_public_reports(
         db=db,
@@ -236,6 +252,8 @@ async def list_public_reports(
             reviewed_at=None,
             review_decision=r.review_decision,
             final_label=getattr(r, 'final_label', None),
+            department=r.department,
+            appeal_round=r.appeal_round or 0,
         )
         for r in reports
     ]
@@ -249,14 +267,12 @@ async def list_all_reports(
     category: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    wallet: str = Depends(require_reviewer_role),
+    wallet: str = Depends(require_moderator_role),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    List ALL reports regardless of ownership.
-
-    Used by reviewers and moderators to see the full report queue.
-    Requires REVIEWER_ROLE or MODERATOR_ROLE on-chain.
+    List ALL reports (all visibilities, all reporters).
+    Requires MODERATOR_ROLE. Used by the moderator dashboard.
     """
     reports, total = await report_service.get_all_reports(
         db=db,
@@ -284,6 +300,9 @@ async def list_all_reports(
             reviewed_at=None,
             review_decision=r.review_decision,
             final_label=getattr(r, 'final_label', None),
+            reporter=r.reporter_nullifier,
+            department=r.department,
+            appeal_round=r.appeal_round or 0,
         )
         for r in reports
     ]
@@ -297,11 +316,8 @@ async def get_report_by_cid_hash(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Fetch report metadata by CID hash (keccak256 of IPFS CID).
-
-    Used by reviewers and moderators who know the on-chain contentHash but are
-    not the original reporter. Returns title and description for review purposes.
-    No ownership check — accessible to any authenticated reviewer/moderator in dev mode.
+    Fetch report metadata by CID hash.
+    No ownership check — accessible to any caller (used by moderator dashboard).
     """
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(
@@ -327,6 +343,7 @@ async def get_report_by_cid_hash(
         risk_level=report.risk_level.value if report.risk_level and hasattr(report.risk_level, 'value') else report.risk_level,
         submitted_at=report.submission_timestamp,
         reviewed_at=None,
+        department=report.department,
     )
 
 
@@ -334,17 +351,11 @@ async def get_report_by_cid_hash(
 async def update_report_status_by_hash(
     cid_hash: str,
     update: ReportStatusUpdate,
-    wallet: str = Depends(require_reviewer_role),
+    wallet: str = Depends(require_moderator_role),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Sync on-chain decision to backend DB status.
-
-    Called by the frontend after setReviewDecision() or finalizeReport()
-    succeeds on-chain so the reporter dashboard and public feed reflect
-    the updated state without requiring a blockchain query.
-
-    Allowed status values: under_review, verified, rejected, disputed, archived
+    Sync on-chain decision to backend DB status. Requires MODERATOR_ROLE.
     """
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(
@@ -381,8 +392,8 @@ async def finalize_report(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Called by the moderator frontend after a report is finalized (on-chain or DB-only mode).
-    Updates the report status in the DB and applies reputation changes to all participants.
+    Called by the moderator after finalizing a report.
+    Updates status, applies reputation changes, routes to selected department.
     """
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(
@@ -406,9 +417,15 @@ async def finalize_report(
         report.final_label = body.final_label
     if body.review_decision:
         report.review_decision = body.review_decision
+
+    # Record the moderator who made this decision (for re-appeal assignment)
+    moderator = body.moderator_address or wallet
+    if not report.original_moderator:
+        report.original_moderator = moderator.lower()
+
     await db.commit()
 
-    # Apply reputation changes when we have enough data to do so
+    # Apply reputation changes
     if body.final_label and body.reporter:
         await reputation_service.apply_finalization_rep_changes(
             db,
@@ -421,37 +438,152 @@ async def finalize_report(
         )
         await db.commit()
 
-    # ── Reviewer penalty: if moderator's final label contradicts the reviewer's decision ──
-    # Matching logic:
-    #   CORROBORATED         → expected REVIEW_PASSED
-    #   FALSE_OR_MANIPULATED → expected REJECT_SPAM
-    #   NEEDS_EVIDENCE/DISPUTED → expected NEEDS_EVIDENCE
-    reviewer_addr = report.reviewer_address
-    review_decision = body.review_decision
-    if body.final_label and reviewer_addr and review_decision:
-        DECISION_MATCH = {
-            'CORROBORATED': 'REVIEW_PASSED',
-            'FALSE_OR_MANIPULATED': 'REJECT_SPAM',
-            'NEEDS_EVIDENCE': 'NEEDS_EVIDENCE',
-            'DISPUTED': 'NEEDS_EVIDENCE',
-        }
-        expected_decision = DECISION_MATCH.get(body.final_label)
-        if expected_decision and review_decision != expected_decision:
-            # Mismatch — penalize the reviewer (−5 rep + strike)
-            await reputation_service.issue_strike(db, reviewer_addr)
-
-    # ── Reviewer penalty: appeal overturned the reviewer's decision ──
-    if body.appeal_outcome == 'APPEAL_WON' and reviewer_addr:
-        await reputation_service.apply_reviewer_appeal_penalty(db, reviewer_addr)
-
-    # ── Route corroborated reports to civic departments ──
+    # ── Route corroborated reports to the selected department ──────────────
     if body.final_label == 'CORROBORATED':
         import asyncio
-        from app.services.routing_service import route_report
+        from app.services.routing_service import route_report_to_department
         report_text = f"{report.encrypted_title or ''} {report.encrypted_summary or ''}"
-        asyncio.create_task(route_report(str(report.id), report_text, db))
+        selected_dept = report.department  # may be None → falls back to text classifier
+        asyncio.create_task(
+            route_report_to_department(str(report.id), report_text, db, selected_dept)
+        )
 
     return {"id": str(report.id), "status": report.status.value}
+
+
+@router.post("/by-hash/{cid_hash}/re-appeal")
+async def re_appeal_report(
+    cid_hash: str,
+    body: ReAppealBody,
+    wallet: str = Depends(get_current_wallet),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reporter files a re-appeal on a rejected or needs-evidence report.
+
+    The report status is set to 'appealed' and appeal_round is incremented.
+    The system will assign two different moderators (not the original moderator)
+    to review the appeal independently.
+
+    Penalisation logic (applied when both moderators have decided):
+      - Both UPHOLD original decision → reporter −5 rep + strike
+      - Either OVERTURN             → original moderator −5 rep + strike
+    """
+    normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
+    result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
+    report = result.scalar_one_or_none()
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if (report.reporter_nullifier or "").lower() != wallet.lower():
+        raise HTTPException(status_code=403, detail="Only the reporter may appeal this report")
+
+    allowed = {ReportStatus.REJECTED, ReportStatus.NEEDS_EVIDENCE, ReportStatus.REJECTED_BY_REVIEWER}
+    if report.status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Re-appeal not allowed for status '{report.status.value}'."
+        )
+
+    report.status = ReportStatus.APPEALED
+    report.appeal_round = (report.appeal_round or 0) + 1
+    # Reset appeal decisions for the new round
+    report.appeal_mod_1 = None
+    report.appeal_mod_2 = None
+    report.appeal_decision_1 = None
+    report.appeal_decision_2 = None
+    await db.commit()
+
+    return {
+        "id": str(report.id),
+        "status": report.status.value,
+        "appeal_round": report.appeal_round,
+        "message": "Re-appeal filed. Two moderators will independently review your case.",
+    }
+
+
+@router.post("/by-hash/{cid_hash}/appeal-decide")
+async def appeal_decide(
+    cid_hash: str,
+    body: AppealDecideBody,
+    wallet: str = Depends(require_moderator_role),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    A moderator records their decision on a re-appeal.
+
+    The moderator must NOT be the original moderator. Slot 1 is filled first;
+    once both slots are filled the system resolves and applies penalties:
+      - Both UPHOLD  → reporter penalised (−5 rep + strike)
+      - Any OVERTURN → original moderator penalised (−5 rep + strike)
+    """
+    if body.decision not in ("UPHOLD", "OVERTURN"):
+        raise HTTPException(status_code=400, detail="decision must be 'UPHOLD' or 'OVERTURN'")
+
+    normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
+    result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
+    report = result.scalar_one_or_none()
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if report.status != ReportStatus.APPEALED:
+        raise HTTPException(status_code=400, detail="Report is not in 'appealed' state")
+
+    mod = wallet.lower()
+
+    # Block original moderator from deciding on their own appeal
+    if report.original_moderator and mod == report.original_moderator.lower():
+        raise HTTPException(
+            status_code=403,
+            detail="The original moderator cannot decide on a re-appeal of their own decision."
+        )
+
+    # Assign slots
+    if not report.appeal_mod_1 or report.appeal_mod_1.lower() == mod:
+        # Fill slot 1 (or update if same mod revisits before slot 2 is filled)
+        report.appeal_mod_1 = mod
+        report.appeal_decision_1 = body.decision
+    elif not report.appeal_mod_2 or report.appeal_mod_2.lower() == mod:
+        # Fill slot 2 (different mod)
+        if report.appeal_mod_1 and mod == report.appeal_mod_1.lower():
+            raise HTTPException(status_code=400, detail="You already submitted a decision for this appeal.")
+        report.appeal_mod_2 = mod
+        report.appeal_decision_2 = body.decision
+    else:
+        raise HTTPException(status_code=400, detail="Both appeal slots are already filled.")
+
+    await db.commit()
+
+    # ── Resolve when both slots are filled ──────────────────────────────────
+    if report.appeal_decision_1 and report.appeal_decision_2:
+        both_uphold = (
+            report.appeal_decision_1 == "UPHOLD"
+            and report.appeal_decision_2 == "UPHOLD"
+        )
+        if both_uphold:
+            # Reporter loses appeal — penalise reporter
+            if report.reporter_nullifier:
+                await reputation_service.issue_strike(db, report.reporter_nullifier)
+            report.status = ReportStatus.REJECTED  # original decision stands
+            msg = "Appeal resolved: both moderators upheld the original decision. Reporter penalised."
+        else:
+            # Original moderator was wrong — penalise them
+            if report.original_moderator:
+                await reputation_service.issue_strike(db, report.original_moderator)
+            report.status = ReportStatus.VERIFIED  # overturn → corroborated
+            msg = "Appeal resolved: decision overturned. Original moderator penalised."
+
+        await db.commit()
+        return {"id": str(report.id), "status": report.status.value, "resolved": True, "message": msg}
+
+    return {
+        "id": str(report.id),
+        "status": report.status.value,
+        "resolved": False,
+        "message": "Decision recorded. Waiting for the second moderator.",
+    }
 
 
 @router.post("/by-hash/{cid_hash}/resubmit")
@@ -460,15 +592,7 @@ async def resubmit_report(
     wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Allow the reporter to resubmit a report that was returned by a reviewer.
-
-    Valid for reports in 'needs_evidence' or 'rejected_by_reviewer' status.
-    Resets status back to 'pending_review' and clears the review decision
-    so it re-enters the reviewer queue from scratch.
-
-    Only the original reporter may call this endpoint.
-    """
+    """Allow the reporter to resubmit a report returned for more evidence."""
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
     report = result.scalar_one_or_none()
@@ -483,16 +607,15 @@ async def resubmit_report(
     if report.status not in allowed_statuses:
         raise HTTPException(
             status_code=400,
-            detail=f"Resubmit not allowed for status '{report.status.value}'. "
-                   f"Only 'needs_evidence' and 'rejected_by_reviewer' reports can be resubmitted."
+            detail=f"Resubmit not allowed for status '{report.status.value}'."
         )
 
-    report.status = ReportStatus.PENDING_REVIEW
+    report.status = ReportStatus.PENDING_MODERATION
     report.review_decision = None
     report.reviewer_address = None
     await db.commit()
 
-    return {"id": str(report.id), "status": report.status.value, "message": "Report resubmitted for review"}
+    return {"id": str(report.id), "status": report.status.value, "message": "Report resubmitted for moderation"}
 
 
 @router.post("/by-hash/{cid_hash}/evidence-key", status_code=200)
@@ -505,9 +628,8 @@ async def store_evidence_key(
     """
     Store the AES-256 evidence key for a report (called by the reporter after submission).
 
-    The key is stored for PUBLIC and MODERATED reports so reviewers/moderators
-    can decrypt the IPFS blob in-browser. PRIVATE reports should not call this endpoint.
-    Only the original reporter (matched by authenticated wallet) may store the key.
+    The key is stored for ALL reports (including private) so moderators can always
+    decrypt the evidence. Only the original reporter may upload the key.
     """
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
@@ -529,22 +651,46 @@ async def store_evidence_key(
 @router.get("/by-hash/{cid_hash}/evidence-key")
 async def get_evidence_key(
     cid_hash: str,
-    wallet: str = Depends(require_reviewer_role),
+    wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Return the AES-256 evidence key for a report.
 
-    Requires REVIEWER_ROLE or MODERATOR_ROLE on-chain.
-    Returns 404 if no key has been stored (PRIVATE report or old submission).
+    Accessible to:
+      • The original reporter (ownership check)
+      • Any authenticated moderator (MODERATOR_ROLE on-chain)
+
+    Returns 404 if no key has been stored yet.
     """
     normalized = cid_hash.lower() if cid_hash.startswith("0x") else f"0x{cid_hash.lower()}"
     result = await db.execute(select(Report).where(Report.commitment_hash == normalized))
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+
+    is_reporter = (report.reporter_nullifier or "").lower() == wallet.lower()
+
+    # Check moderator role (lazy — don't raise if check fails, just deny)
+    is_moderator = False
+    if not is_reporter:
+        try:
+            from app.api.v1.rbac import require_moderator_role
+            from app.services.blockchain_service import blockchain_service
+            if not blockchain_service.w3:
+                await blockchain_service.initialize()
+            is_moderator = await blockchain_service.has_moderator_role(wallet)
+        except Exception:
+            # In dev/debug mode without contracts, allow any authenticated wallet
+            if settings.DEBUG:
+                is_moderator = True
+
+    if not is_reporter and not is_moderator:
+        raise HTTPException(status_code=403, detail="Access denied — moderator role or report ownership required")
+
     if not report.evidence_key:
         raise HTTPException(status_code=404, detail="No evidence key available for this report")
+
     return {
         "key_hex": report.evidence_key,
         "visibility": report.visibility.value if hasattr(report.visibility, 'value') else str(report.visibility),
@@ -559,17 +705,12 @@ async def get_report(
     wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get report details by ID.
-
-    Note: Encrypted content is fetched from IPFS by the frontend.
-    """
+    """Get report details by ID. Ownership required."""
     report = await report_service.get_report_by_id(db, report_id)
 
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    # Check ownership — use reporter_nullifier (authenticated wallet)
     if report.reporter_nullifier != wallet:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -588,6 +729,7 @@ async def get_report(
         risk_level=report.risk_level.value if report.risk_level and hasattr(report.risk_level, 'value') else report.risk_level,
         submitted_at=report.submission_timestamp,
         reviewed_at=None,
+        department=report.department,
     )
 
 
@@ -597,11 +739,7 @@ async def delete_report(
     wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Mark a report as deleted (soft delete).
-
-    Note: The blockchain commitment and IPFS data remain unchanged.
-    """
+    """Mark a report as deleted (soft delete). Ownership required."""
     report = await report_service.get_report_by_id(db, report_id)
 
     if not report:
@@ -610,9 +748,7 @@ async def delete_report(
     if report.reporter_nullifier != wallet:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Soft delete
     success = await report_service.delete_report(db, report_id)
-
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete report")
 
@@ -626,11 +762,7 @@ async def commit_to_blockchain(
     wallet: str = Depends(get_current_wallet),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Update report with blockchain commitment transaction hash.
-
-    Called after the frontend successfully commits to the blockchain.
-    """
+    """Update report with blockchain commitment transaction hash."""
     report = await report_service.get_report_by_id(db, report_id)
 
     if not report:
@@ -639,7 +771,6 @@ async def commit_to_blockchain(
     if report.reporter_nullifier != wallet:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Update with blockchain info
     updated = await report_service.update_blockchain_info(
         db=db,
         report_id=report_id,
@@ -657,6 +788,7 @@ async def commit_to_blockchain(
         visibility=updated.visibility.value if hasattr(updated.visibility, 'value') else str(updated.visibility),
         size_bytes=updated.file_size,
         submitted_at=updated.submission_timestamp,
+        department=updated.department,
         message="Blockchain commitment recorded"
     )
 
@@ -667,9 +799,7 @@ async def get_report_status(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get the current status of a report.
-    """
+    """Get the current status of a report (public)."""
     report = await report_service.get_report_by_id(db, report_id)
 
     if not report:
@@ -680,5 +810,8 @@ async def get_report_status(
         "status": report.status.value,
         "verification_score": float(report.verification_score) if report.verification_score else None,
         "risk_level": report.risk_level.value if report.risk_level and hasattr(report.risk_level, 'value') else report.risk_level,
-        "reviewed_at": None,  # derive from moderation table if needed
+        "reviewed_at": None,
+        "final_label": report.final_label,
+        "appeal_round": report.appeal_round or 0,
+        "department": report.department,
     }

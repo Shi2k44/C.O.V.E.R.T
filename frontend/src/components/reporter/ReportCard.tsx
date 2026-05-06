@@ -24,6 +24,7 @@ interface ReportCardProps {
   onDelete?: (id: string) => void;
   onAppeal?: (report: Report) => void;
   onResubmit?: (report: Report) => void;
+  onReAppeal?: (report: Report) => void;
 }
 
 const statusConfig: Record<ReportStatus, { label: string; color: string; icon: React.ElementType }> = {
@@ -139,6 +140,7 @@ export const ReportCard = memo(function ReportCard({
   onDelete,
   onAppeal,
   onResubmit,
+  onReAppeal,
 }: ReportCardProps) {
   const navigate = useNavigate();
 
@@ -292,7 +294,15 @@ export const ReportCard = memo(function ReportCard({
               Appeal (8 COV)
             </button>
           )}
-          {report.hasAppeal && (
+          {onReAppeal && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReAppeal(report); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-900/30 text-purple-400 border border-purple-800/50 hover:border-purple-600 hover:bg-purple-900/50 transition-all"
+            >
+              Re-appeal
+            </button>
+          )}
+          {report.hasAppeal && !onReAppeal && (
             <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-purple-900/30 text-purple-400 border border-purple-800/50">
               Appealed
             </span>

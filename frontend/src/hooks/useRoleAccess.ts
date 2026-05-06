@@ -9,7 +9,6 @@ import { API_BASE } from '@/config';
 
 interface RoleAccessState {
   loading: boolean;
-  isReviewer: boolean;
   isModerator: boolean;
   covBalance: string;
   lockedBalance: string;
@@ -20,7 +19,6 @@ interface RoleAccessState {
 
 const INITIAL: RoleAccessState = {
   loading: true,
-  isReviewer: false,
   isModerator: false,
   covBalance: '0',
   lockedBalance: '0',
@@ -37,6 +35,11 @@ async function fetchReputation(address: string): Promise<{ reputation_score: num
   } catch {
     return { reputation_score: 0, tier: 'user' };
   }
+}
+
+/** localStorage key used to remember that the welcome grant was already claimed. */
+function welcomeClaimedKey(address: string) {
+  return `covert_welcome_claimed_${address.toLowerCase()}`;
 }
 
 export function useRoleAccess() {
@@ -70,7 +73,6 @@ export function useRoleAccess() {
       });
 
       // Only show the loading spinner on the very first load.
-      // Background polls (interval / rep-refresh events) update silently.
       if (!isBackground) {
         setState((prev) => ({ ...prev, loading: true }));
       }
@@ -79,11 +81,8 @@ export function useRoleAccess() {
         if (import.meta.env.VITE_DEV_MODE === 'true') {
           const role = getAddressRole(walletState.address);
           console.info(`[DEV MODE] Address ${walletState.address} → role: ${role}`);
-          // Fetch real rep from backend so rep starts at 0 and reflects actual moderation outcomes
           const repData = await fetchReputation(walletState.address);
 
-          // If CovertProtocol is deployed, sync the real on-chain COV balance into the store
-          // so the UI always shows what the chain actually holds, not a stale localStorage value.
           if (import.meta.env.VITE_COVERT_PROTOCOL_ADDRESS) {
             try {
               await protocolService.connect();
@@ -99,7 +98,6 @@ export function useRoleAccess() {
             initialLoadDone.current = true;
             setState({
               loading: false,
-              isReviewer: role === 'reviewer',
               isModerator: role === 'moderator',
               covBalance: '0', // overridden by covBalanceLive from store below
               lockedBalance: '0',
@@ -118,27 +116,31 @@ export function useRoleAccess() {
           fetchReputation(walletState.address),
         ]);
 
-        // ── Auto-claim 30 COV welcome grant for new users ──
-        if (!userState.welcomeClaimed) {
+        // ── Auto-claim 30 COV welcome grant for new users ──────────────────
+        // Guard with localStorage so we never attempt the claim twice for the
+        // same wallet (avoids redundant wallet prompts on every login).
+        const alreadyClaimed =
+          userState.welcomeClaimed ||
+          localStorage.getItem(welcomeClaimedKey(walletState.address)) === '1';
+
+        if (!alreadyClaimed) {
           toast.loading('Welcome! Confirm in your wallet to receive 30 COV tokens…', {
             id: 'welcome-claim',
           });
           try {
             await protocolService.claimWelcome();
-            // Refresh balance after claim
             const refreshed = await protocolService.getUserState(walletState.address);
             userState.covBalance = refreshed.covBalance;
             userState.welcomeClaimed = true;
+            // Persist so future logins skip the claim attempt entirely
+            localStorage.setItem(welcomeClaimedKey(walletState.address), '1');
             toast.success('30 COV tokens added to your account!', { id: 'welcome-claim' });
           } catch {
             toast.dismiss('welcome-claim');
-            // User rejected or tx failed — they can claim manually later
+            // User rejected or tx failed — they can try again manually
           }
         }
 
-        const isReviewer = userState.badges.some(
-          (badge) => badge.type === BadgeType.REVIEWER_BADGE && badge.active
-        );
         const isModerator = userState.badges.some(
           (badge) => badge.type === BadgeType.MODERATOR_BADGE && badge.active
         );
@@ -147,7 +149,6 @@ export function useRoleAccess() {
           initialLoadDone.current = true;
           setState({
             loading: false,
-            isReviewer,
             isModerator,
             covBalance: userState.covBalance,
             lockedBalance: userState.lockedBalance,
@@ -163,9 +164,8 @@ export function useRoleAccess() {
             initialLoadDone.current = true;
             setState({
               loading: false,
-              isReviewer: role === 'reviewer',
               isModerator: role === 'moderator',
-              covBalance: '0', // overridden by covBalanceLive from store below
+              covBalance: '0',
               lockedBalance: '0',
               badges: [],
               reputationScore: 0,

@@ -300,13 +300,16 @@ export function ReporterDashboard() {
   const [publicTotal, setPublicTotal] = useState(0);
 
   const isConnected = walletState.connected;
-  const UNAUTHENTICATED_LIMIT = 3;
 
-  // ── Fetch public report feed (visible to everyone) ──
+  // ── Fetch public report feed (logged-in users only) ──
   const fetchPublic = useCallback(async () => {
+    if (!walletState.connected) return;
     setPublicLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/reports/public?limit=20`);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/api/v1/reports/public?limit=20`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         setPublicReports(mapApiReports(data.items || []));
@@ -317,20 +320,20 @@ export function ReporterDashboard() {
     } finally {
       setPublicLoading(false);
     }
-  }, []);
+  }, [walletState.connected]);
 
   useEffect(() => {
     fetchPublic();
   }, [fetchPublic]);
 
-  // When wallet disconnects, reset state so the auth gate renders correctly
+  // When wallet disconnects, clear the feed
   useEffect(() => {
     if (!isConnected) {
       setPublicReports([]);
       setPublicTotal(0);
-      fetchPublic(); // re-fetch to get the fresh (unauthenticated) view
+      setPublicLoading(false);
     }
-  }, [isConnected, fetchPublic]);
+  }, [isConnected]);
 
   // Re-fetch public feed when a reviewer or moderator records a decision
   useEffect(() => {
@@ -346,9 +349,7 @@ export function ReporterDashboard() {
     return () => clearInterval(interval);
   }, [fetchPublic]);
 
-  // Unauthenticated users see only the first 3 reports
-  const visibleReports = isConnected ? publicReports : publicReports.slice(0, UNAUTHENTICATED_LIMIT);
-  const hiddenCount = isConnected ? 0 : Math.max(0, publicReports.length - UNAUTHENTICATED_LIMIT);
+  const visibleReports = publicReports;
 
   return (
     <div className="space-y-8">
@@ -392,35 +393,32 @@ export function ReporterDashboard() {
           </button>
         </div>
         <div className="p-4">
-          {publicLoading ? (
+          {!isConnected ? (
+            <div className="text-center py-10">
+              <LockClosedIcon className="h-10 w-10 text-neutral-700 mx-auto mb-3" />
+              <p className="text-neutral-400 text-sm font-medium">Connect your wallet to view public reports</p>
+              <p className="text-xs text-neutral-600 mt-1">
+                Public reports are visible to all registered wallet holders.
+              </p>
+            </div>
+          ) : publicLoading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="animate-pulse bg-neutral-900 rounded-xl h-16" />
               ))}
             </div>
-          ) : publicReports.length > 0 ? (
+          ) : visibleReports.length > 0 ? (
             <div className="space-y-3">
               {visibleReports.map((report) => (
                 <PublicReportCard key={report.id} report={report} isConnected={isConnected} />
               ))}
-              {/* Auth gate — prompt unauthenticated visitors to connect */}
-              {!isConnected && hiddenCount > 0 && (
-                <div className="rounded-xl border border-dashed border-neutral-700 bg-neutral-900/30 p-5 text-center space-y-1.5">
-                  <p className="text-sm font-medium text-neutral-300">
-                    {hiddenCount} more report{hiddenCount !== 1 ? 's' : ''} available
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    Connect your wallet to view all public reports and evidence files.
-                  </p>
-                </div>
-              )}
             </div>
           ) : (
             <div className="text-center py-10">
               <GlobeAltIcon className="h-10 w-10 text-neutral-700 mx-auto mb-3" />
               <p className="text-neutral-500 text-sm">No public reports yet</p>
               <p className="text-xs text-neutral-600 mt-1">
-                Reports submitted with <span className="text-neutral-400">Public</span> visibility appear here for all users.
+                Reports submitted with <span className="text-neutral-400">Public</span> visibility appear here.
               </p>
             </div>
           )}

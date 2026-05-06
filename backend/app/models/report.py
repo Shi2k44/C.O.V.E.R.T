@@ -170,15 +170,26 @@ class Report(Base):
     )
     last_accessed_at = Column(DateTime(timezone=True))
 
-    # Evidence Key (AES-256 key stored as hex, for reviewer/moderator access)
-    # Populated for PUBLIC and MODERATED reports after submission.
-    # NULL for PRIVATE reports (key stays in reporter's localStorage only).
+    # Evidence Key (AES-256 key stored as hex, for moderator access)
+    # Populated for ALL reports after submission so moderators can always decrypt.
+    # Key retrieval is gated by moderator role (or reporter ownership) in the API.
     evidence_key = Column(Text)
 
-    # Reviewer tracking — wallet address and decision of the reviewer who assessed this report
+    # Reviewer tracking (kept for backward compat; no longer used in new flow)
     reviewer_address = Column(String(42))
     review_decision = Column(String(20))  # 'REVIEW_PASSED' | 'NEEDS_EVIDENCE' | 'REJECT_SPAM' | None
     final_label = Column(String(30))  # 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED' | None
+
+    # Department routing — user-selected Bangalore govt department
+    department = Column(String(200))
+
+    # Re-appeal tracking
+    appeal_round = Column(Integer, nullable=False, default=0)
+    appeal_mod_1 = Column(String(42))        # First moderator assigned to re-appeal
+    appeal_mod_2 = Column(String(42))        # Second moderator assigned to re-appeal
+    appeal_decision_1 = Column(String(30))   # 'UPHOLD' | 'OVERTURN'
+    appeal_decision_2 = Column(String(30))   # 'UPHOLD' | 'OVERTURN'
+    original_moderator = Column(String(42))  # Moderator who made the original finalization
 
     # Scheduled Submission (delayed publishing for reporter safety)
     scheduled_for = Column(DateTime(timezone=True))

@@ -8,7 +8,6 @@ import { useState } from 'react';
 import {
   UserCircleIcon,
   ShieldCheckIcon,
-  MagnifyingGlassIcon,
   StarIcon,
   LockClosedIcon,
   ChartBarIcon,
@@ -24,7 +23,7 @@ function formatCov(raw: string): string {
   return n % 1 === 0 ? n.toFixed(0) : n.toFixed(2);
 }
 
-type RoleLabel = 'Moderator' | 'Reviewer' | 'User';
+type RoleLabel = 'Moderator' | 'User';
 
 const ROLE_CONFIG: Record<RoleLabel, { color: string; bg: string; ringColor: string; Icon: React.ElementType }> = {
   Moderator: {
@@ -32,12 +31,6 @@ const ROLE_CONFIG: Record<RoleLabel, { color: string; bg: string; ringColor: str
     bg: 'bg-purple-900/30',
     ringColor: 'ring-purple-700',
     Icon: ShieldCheckIcon,
-  },
-  Reviewer: {
-    color: 'text-blue-400',
-    bg: 'bg-blue-900/30',
-    ringColor: 'ring-blue-700',
-    Icon: MagnifyingGlassIcon,
   },
   User: {
     color: 'text-neutral-400',
@@ -96,7 +89,7 @@ function BadgeLabel({ badges }: { badges: { type: BadgeType; active: boolean }[]
 export function ProfileButton() {
   const {
     connected, loading,
-    isReviewer, isModerator,
+    isModerator,
     covBalance, lockedBalance, badges,
     reputationScore, reputationTier,
   } = useRoleAccess();
@@ -104,7 +97,7 @@ export function ProfileButton() {
 
   if (!connected) return null;
 
-  const role: RoleLabel = isModerator ? 'Moderator' : isReviewer ? 'Reviewer' : 'User';
+  const role: RoleLabel = isModerator ? 'Moderator' : 'User';
   const { color, bg, ringColor, Icon } = ROLE_CONFIG[role];
   const tierCfg = TIER_CONFIG[reputationTier] ?? TIER_CONFIG.user;
   const showRepScore = true; // every connected wallet has a rep score (spec §1)

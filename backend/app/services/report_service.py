@@ -32,6 +32,7 @@ class ReportService:
         title: Optional[str] = None,
         description: Optional[str] = None,
         delay_hours: Optional[int] = None,
+        department: Optional[str] = None,
     ) -> Report:
         """Create a new report"""
         try:
@@ -65,7 +66,10 @@ class ReportService:
                 chain_submitted=not bool(delay_hours),
                 # Chain — default to local Anvil; can be overridden via env
                 chain_id=settings.CHAIN_ID,
-                status=ReportStatus.PENDING_REVIEW,
+                # Skip reviewer step — go directly to moderation queue
+                status=ReportStatus.PENDING_MODERATION,
+                # User-selected Bangalore dept for routing
+                department=department,
             )
 
             db.add(report)

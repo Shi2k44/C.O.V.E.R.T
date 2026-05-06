@@ -19,8 +19,10 @@ import {
     LockClosedIcon,
     ExclamationTriangleIcon,
     ArrowPathIcon,
+    ArrowUpTrayIcon,
 } from '@heroicons/react/24/outline';
 import { encryptionService } from '@/services/encryption';
+import { web3Service } from '@/services/web3';
 import { ipfsService } from '@/services/ipfs';
 import type { EncryptedReportBlob, DecryptedReportData } from '@/types/encryption';
 import { API_BASE } from '@/config';
@@ -124,11 +126,15 @@ interface EvidenceViewerProps {
 }
 
 export function EvidenceViewer({ contentHash, cid, visibility }: EvidenceViewerProps) {
-    const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+    const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error' | 'needs-auth' | 'needs-sync'>('idle');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [errorMsg, setErrorMsg] = useState('');
+    const [syncing, setSyncing] = useState(false);
 
     const isPrivate = visibility === 'private';
+
+    /** Check if the reporter's local key exists for this CID */
+    const hasLocalKey = (): boolean => !!localStorage.getItem(`covert_key_${cid}`);
 
     const loadEvidence = async () => {
         setState('loading');
@@ -141,6 +147,15 @@ export function EvidenceViewer({ contentHash, cid, visibility }: EvidenceViewerP
                 headers: _evToken ? { 'Authorization': `Bearer ${_evToken}` } : {},
             });
             if (!keyRes.ok) {
+                if (keyRes.status === 401 || keyRes.status === 403 || keyRes.status === 422) {
+                    setState('needs-auth');
+                    return;
+                }
+                if (keyRes.status === 404 && hasLocalKey()) {
+                    // Reporter hasn't synced their key yet — offer to do it
+                    setState('needs-sync');
+                    return;
+                }
                 const err = await keyRes.json().catch(() => ({ detail: 'No evidence key available' }));
                 throw new Error(err.detail ?? 'Failed to fetch evidence key');
             }
@@ -168,6 +183,41 @@ export function EvidenceViewer({ contentHash, cid, visibility }: EvidenceViewerP
         } catch (err) {
             setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
             setState('error');
+        }
+    };
+
+    /** Upload the locally-stored AES key to the backend so reviewers can access it */
+    const syncKeyToBackend = async () => {
+        setSyncing(true);
+        try {
+            const signature = await web3Service.signMessage(`COVERT Key Storage: ${cid}`);
+            const keyBytes = await encryptionService.retrieveKey(cid, signature);
+            if (!keyBytes) throw new Error('Key not found in local storage');
+
+            const keyHex = Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            const token = localStorage.getItem('token');
+            const walletAddress = localStorage.getItem('wallet_address');
+            const res = await fetch(`${API_BASE}/api/v1/reports/by-hash/${contentHash}/evidence-key`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+                },
+                body: JSON.stringify({ key_hex: keyHex }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail ?? `Server returned ${res.status}`);
+            }
+            // Key synced — now load evidence
+            setState('idle');
+            loadEvidence();
+        } catch (err) {
+            setErrorMsg(err instanceof Error ? err.message : 'Sync failed');
+            setState('error');
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -203,6 +253,39 @@ export function EvidenceViewer({ contentHash, cid, visibility }: EvidenceViewerP
             <div className="flex items-center gap-2 text-sm text-neutral-400">
                 <ArrowPathIcon className="h-4 w-4 animate-spin" />
                 Fetching and decrypting evidence…
+            </div>
+        );
+    }
+
+    if (state === 'needs-auth') {
+        return (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 flex items-center gap-3">
+                <LockClosedIcon className="h-5 w-5 text-neutral-500 shrink-0" />
+                <p className="text-sm text-neutral-400">Sign in to view the evidence.</p>
+            </div>
+        );
+    }
+
+    if (state === 'needs-sync') {
+        return (
+            <div className="rounded-xl border border-amber-900/40 bg-neutral-950 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                    <ExclamationTriangleIcon className="h-4 w-4 text-amber-500 shrink-0" />
+                    <p className="text-sm font-medium text-amber-400">Evidence key not synced</p>
+                </div>
+                <p className="text-xs text-neutral-500">
+                    Your encryption key hasn't been uploaded to the backend yet. Sync it so reviewers can access the evidence.
+                </p>
+                <button
+                    onClick={syncKeyToBackend}
+                    disabled={syncing}
+                    className="flex items-center gap-1.5 text-xs text-amber-400 hover:text-white underline disabled:opacity-50"
+                >
+                    {syncing
+                        ? <><ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> Syncing…</>
+                        : <><ArrowUpTrayIcon className="h-3.5 w-3.5" /> Sync key to backend</>
+                    }
+                </button>
             </div>
         );
     }

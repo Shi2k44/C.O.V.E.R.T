@@ -10,13 +10,52 @@ import logging
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.routing import Department, ReportRouting
 from app.services.classifier_service import classify_report, is_bangalore
 
 logger = logging.getLogger(__name__)
+
+
+async def route_report_to_department(
+    report_id: str,
+    report_text: str,
+    db: AsyncSession,
+    selected_department: Optional[str] = None,
+) -> List[str]:
+    """
+    Route a corroborated report to the correct Bangalore department.
+
+    If `selected_department` is set (user chose a dept at submission time),
+    look that department up by name and route directly.
+    Otherwise fall back to the keyword classifier.
+    """
+    if selected_department:
+        # Find by name (case-insensitive)
+        dept_result = await db.execute(
+            select(Department).where(
+                Department.is_active.is_(True),
+                func.lower(Department.name) == selected_department.strip().lower(),
+            )
+        )
+        dept = dept_result.scalar_one_or_none()
+        if dept:
+            token = uuid.uuid4()
+            routing = ReportRouting(
+                report_id=report_id,
+                department_id=dept.id,
+                response_token=token,
+            )
+            db.add(routing)
+            await db.commit()
+            asyncio.create_task(_send_notification(dept, report_id, token, db))
+            logger.info(f"[routing] Report {report_id}: routed to selected dept '{dept.name}'")
+            return [dept.name]
+        # Selected dept not found in DB — fall through to text classifier
+
+    return await route_report(report_id, report_text, db)
 
 
 async def route_report(

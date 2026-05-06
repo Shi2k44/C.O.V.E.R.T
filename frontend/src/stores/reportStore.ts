@@ -63,6 +63,8 @@ export interface ReportDraft {
   delayHours: number;
   files: File[];
   fileMetadata: FileMetadata[];
+  /** User-selected Bangalore govt department for post-decision routing */
+  department: string;
 }
 
 export interface SubmissionProgress {
@@ -146,6 +148,7 @@ const initialDraft: ReportDraft = {
   delayHours: 0,
   files: [],
   fileMetadata: [],
+  department: '',
 };
 
 const initialProgress: SubmissionProgress = {

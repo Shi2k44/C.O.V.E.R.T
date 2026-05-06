@@ -40,9 +40,9 @@ import { API_BASE } from '@/config';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'queue' | 'appeals' | 'flagged' | 'reviewers' | 'log';
+type Tab = 'queue' | 'appeals' | 'flagged' | 'log';
 type SortKey = 'oldest' | 'newest' | 'most_cov' | 'most_disputes';
-type FilterKey = 'pending' | 'review_passed' | 'needs_evidence' | 'reject_spam' | 'appealed' | 'all' | 'finalized';
+type FilterKey = 'pending' | 'appealed' | 'all' | 'finalized';
 
 interface ModerableReport {
     id: number;
@@ -652,12 +652,14 @@ function ReportCard({
                                 </p>
                             )}
 
-                            {/* Evidence files — fetches AES key from backend and decrypts in-browser */}
+                            {/* Evidence files — fetches AES key from backend and decrypts in-browser.
+                                Moderators pass 'public' so the viewer never shows the "Private Report"
+                                lock screen — the backend gates access by moderator role instead. */}
                             {reportContent.cid && (
                                 <EvidenceViewer
                                     contentHash={report.contentHash}
                                     cid={reportContent.cid}
-                                    visibility={reportContent.visibility ?? 'private'}
+                                    visibility="public"
                                 />
                             )}
                         </div>
@@ -671,6 +673,7 @@ function ReportCard({
                         </code>
                     </div>
 
+                    {/* Evidence + finalization actions for PENDING; evidence-only for finalized */}
                     {isPending ? (
                         <>
                             {/* Actor lists with deep-dive chips */}
@@ -825,11 +828,21 @@ function ReportCard({
                             </button>
                         </>
                     ) : (
-                        <div className="bg-neutral-900 rounded-lg border border-neutral-700 p-4 flex items-center gap-2">
-                            <CheckCircleIcon className="w-5 h-5 text-neutral-400" />
-                            <span className="font-medium text-neutral-200">
-                                Finalized as "{FINAL_LABEL_NAMES[report.finalLabel]}"
-                            </span>
+                        <div className="space-y-4">
+                            <div className="bg-neutral-900 rounded-lg border border-neutral-700 p-4 flex items-center gap-2">
+                                <CheckCircleIcon className="w-5 h-5 text-neutral-400" />
+                                <span className="font-medium text-neutral-200">
+                                    Finalized as "{FINAL_LABEL_NAMES[report.finalLabel]}"
+                                </span>
+                            </div>
+                            {/* Evidence still accessible post-finalization */}
+                            {reportContent?.cid && (
+                                <EvidenceViewer
+                                    contentHash={report.contentHash}
+                                    cid={reportContent.cid}
+                                    visibility="public"
+                                />
+                            )}
                         </div>
                     )}
                 </div>
@@ -1051,8 +1064,10 @@ export function ProtocolModeratorDashboard() {
             if (!usedBlockchain) {
                 setFromBlockchain(false);
                 // Fall back to backend DB — shows all reports from all wallets
+                const _token = localStorage.getItem('token');
                 const res = await fetch(`${API_BASE}/api/v1/reports/all?limit=100`, {
                     headers: {
+                        ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
                         ...(moderatorAddress ? { 'X-Wallet-Address': moderatorAddress } : {}),
                     },
                 });
@@ -1206,10 +1221,12 @@ export function ProtocolModeratorDashboard() {
             [ReviewerDecision.REJECT_SPAM]: 'REJECT_SPAM',
         };
 
+        const token = localStorage.getItem('token');
         fetch(`${API_BASE}/api/v1/reports/by-hash/${contentHash}/finalize`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
                 ...(moderatorAddress ? { 'X-Wallet-Address': moderatorAddress } : {}),
             },
             body: JSON.stringify({
@@ -1221,6 +1238,7 @@ export function ProtocolModeratorDashboard() {
                 challengers,
                 malicious_wallets: Array.from(maliciousActors),
                 review_decision: reviewDecision !== undefined ? REVIEW_DECISION_KEY[reviewDecision] : null,
+                moderator_address: moderatorAddress,
             }),
         }).catch(() => { /* non-critical — on-chain action already succeeded */ });
     };
@@ -1328,25 +1346,27 @@ export function ProtocolModeratorDashboard() {
             !moderatorAddress || r.reporter.toLowerCase() !== moderatorAddress.toLowerCase()
         );
 
-        // Filter — in DB mode, "pending" shows only reports awaiting moderation
-        // (pending_moderation + appealed). In blockchain mode, use finalLabel as before.
+        // Filter
         if (filterKey === 'pending') {
             if (!fromBlockchain) {
-                // DB fallback: only show reports the moderator should act on
-                list = list.filter(r =>
-                    r.dbStatus === 'pending_moderation' ||
-                    r.dbStatus === 'appealed' ||
-                    r.dbStatus === 'under_review'  // legacy
-                );
+                // DB fallback: show all un-finalized reports awaiting moderator action
+                const pendingDbStatuses = new Set([
+                    'pending_moderation', 'pending_review', 'pending',
+                    'under_review', 'needs_evidence', 'rejected_by_reviewer',
+                ]);
+                list = list.filter(r => r.dbStatus && pendingDbStatuses.has(r.dbStatus));
             } else {
                 list = list.filter(r => r.finalLabel === FinalLabel.UNREVIEWED);
             }
         }
         else if (filterKey === 'finalized') list = list.filter(r => r.finalLabel !== FinalLabel.UNREVIEWED);
-        else if (filterKey === 'appealed') list = list.filter(r => r.hasAppeal && r.finalLabel === FinalLabel.UNREVIEWED);
-        else if (filterKey === 'review_passed') list = list.filter(r => r.reviewDecision === ReviewerDecision.REVIEW_PASSED && r.finalLabel === FinalLabel.UNREVIEWED);
-        else if (filterKey === 'needs_evidence') list = list.filter(r => r.reviewDecision === ReviewerDecision.NEEDS_EVIDENCE && r.finalLabel === FinalLabel.UNREVIEWED);
-        else if (filterKey === 'reject_spam') list = list.filter(r => r.reviewDecision === ReviewerDecision.REJECT_SPAM && r.finalLabel === FinalLabel.UNREVIEWED);
+        else if (filterKey === 'appealed') {
+            if (!fromBlockchain) {
+                list = list.filter(r => r.dbStatus === 'appealed');
+            } else {
+                list = list.filter(r => r.hasAppeal && r.finalLabel === FinalLabel.UNREVIEWED);
+            }
+        }
 
         // Sort
         if (sortKey === 'oldest') list.sort((a, b) => a.createdAt - b.createdAt);
@@ -1362,9 +1382,13 @@ export function ProtocolModeratorDashboard() {
         !moderatorAddress || r.reporter.toLowerCase() !== moderatorAddress.toLowerCase()
     );
     const appealsQueue = reviewableReports.filter(r => r.hasAppeal && r.finalLabel === FinalLabel.UNREVIEWED);
+    const PENDING_DB_STATUSES = new Set([
+        'pending_moderation', 'pending_review', 'pending',
+        'under_review', 'needs_evidence', 'rejected_by_reviewer',
+    ]);
     const pendingCount = fromBlockchain
-        ? reviewableReports.filter(r => r.finalLabel === FinalLabel.UNREVIEWED && r.reviewDecision !== ReviewerDecision.NONE).length
-        : reviewableReports.filter(r => r.dbStatus === 'pending_moderation' || r.dbStatus === 'appealed' || r.dbStatus === 'under_review').length;
+        ? reviewableReports.filter(r => r.finalLabel === FinalLabel.UNREVIEWED).length
+        : reviewableReports.filter(r => r.dbStatus && PENDING_DB_STATUSES.has(r.dbStatus)).length;
     const appealCount = appealsQueue.length;
     const finalizedCount = reviewableReports.filter(r => r.finalLabel !== FinalLabel.UNREVIEWED).length;
     const totalCov = reviewableReports.reduce((sum, r) => sum + (r.finalLabel === FinalLabel.UNREVIEWED ? totalCovAtRisk(r) : 0), 0);
@@ -1372,8 +1396,7 @@ export function ProtocolModeratorDashboard() {
     const TABS: { key: Tab; label: string; badge?: number }[] = [
         { key: 'queue', label: 'Queue', badge: pendingCount },
         { key: 'appeals', label: 'Appeals', badge: appealCount },
-        { key: 'flagged', label: 'Flagged' },
-        { key: 'reviewers', label: 'Reviewers' },
+        { key: 'flagged', label: 'Flagged Users' },
         { key: 'log', label: 'Audit Log', badge: finalizedCount },
     ];
 
@@ -1460,7 +1483,7 @@ export function ProtocolModeratorDashboard() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                             <AdjustmentsHorizontalIcon className="w-4 h-4 text-neutral-500" />
                             <span className="text-xs text-neutral-500 font-medium">Filter:</span>
-                            {(['pending', 'review_passed', 'needs_evidence', 'reject_spam', 'appealed', 'all', 'finalized'] as FilterKey[]).map(fk => (
+                            {(['pending', 'appealed', 'all', 'finalized'] as FilterKey[]).map(fk => (
                                 <button
                                     key={fk}
                                     onClick={() => setFilterKey(fk)}
@@ -1471,9 +1494,6 @@ export function ProtocolModeratorDashboard() {
                                     }`}
                                 >
                                     {fk === 'pending' ? 'Pending' :
-                                     fk === 'review_passed' ? 'Passed' :
-                                     fk === 'needs_evidence' ? 'Needs Ev.' :
-                                     fk === 'reject_spam' ? 'Spam' :
                                      fk === 'appealed' ? 'Appealed' :
                                      fk === 'finalized' ? 'Finalized' : 'All'}
                                 </button>
@@ -1581,9 +1601,6 @@ export function ProtocolModeratorDashboard() {
 
             {/* ── Flagged Tab ── */}
             {activeTab === 'flagged' && <FlaggedTab onDeepDive={setDeepDiveWallet} />}
-
-            {/* ── Reviewers Tab ── */}
-            {activeTab === 'reviewers' && <ReviewersTab onDeepDive={setDeepDiveWallet} />}
 
             {/* ── Audit Log Tab ── */}
             {activeTab === 'log' && (
