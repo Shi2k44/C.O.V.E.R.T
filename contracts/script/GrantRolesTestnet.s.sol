@@ -25,7 +25,13 @@ contract GrantRolesTestnet is Script {
     address constant BADGES   = 0x81ec2Fe3467535fd8e3A8a5bc00Bc226f2fedda4;
 
     function grantModerator(CovertProtocol protocol, CovertBadges badges, address addr) internal {
-        // Grant role (idempotent — AccessControl ignores duplicate grants)
+        // Revoke REVIEWER_ROLE first if held — contract enforces mutual exclusivity
+        if (protocol.hasRole(protocol.REVIEWER_ROLE(), addr)) {
+            protocol.revokeRole(protocol.REVIEWER_ROLE(), addr);
+            console.log("[OK] Reviewer role revoked for:", addr);
+        }
+
+        // Grant MODERATOR_ROLE (idempotent — AccessControl ignores duplicate grants)
         protocol.grantRole(protocol.MODERATOR_ROLE(), addr);
 
         // Only mint badge if not already minted (tokenId 0 = none)
