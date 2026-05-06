@@ -37,9 +37,11 @@ async function fetchReputation(address: string): Promise<{ reputation_score: num
   }
 }
 
-/** localStorage key used to remember that the welcome grant was already claimed. */
+/** localStorage key used to remember that the welcome grant was already claimed.
+ *  Versioned — bump the suffix (v2, v3…) whenever a fresh-start wipe happens
+ *  so all users get the welcome grant once more on next login. */
 function welcomeClaimedKey(address: string) {
-  return `covert_welcome_claimed_${address.toLowerCase()}`;
+  return `covert_welcome_claimed_v2_${address.toLowerCase()}`;
 }
 
 export function useRoleAccess() {

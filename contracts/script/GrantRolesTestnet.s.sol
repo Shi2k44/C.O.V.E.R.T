@@ -7,16 +7,14 @@ import "../src/CovertBadges.sol";
 
 /**
  * @title GrantRolesTestnet
- * @notice Grants REVIEWER_ROLE / MODERATOR_ROLE on CovertProtocol
- *         AND mints the corresponding SBT badges on CovertBadges
- *         so the frontend routes users to the correct dashboard.
+ * @notice Grants MODERATOR_ROLE on CovertProtocol AND mints MODERATOR_BADGE SBTs
+ *         on CovertBadges for all three testnet moderator accounts.
  *
  * Required .env variables:
- *   PRIVATE_KEY            – deployer private key (must hold DEFAULT_ADMIN_ROLE)
- *   REVIEWER_ADDRESS_1     – 0x-prefixed wallet address
- *   REVIEWER_ADDRESS_2     – 0x-prefixed wallet address
- *   MODERATOR_ADDRESS_1    – 0x-prefixed wallet address
- *   MODERATOR_ADDRESS_2    – 0x-prefixed wallet address
+ *   PRIVATE_KEY         – deployer private key (must hold DEFAULT_ADMIN_ROLE)
+ *   MODERATOR_ADDRESS_1 – 0xa429C534cF66A83bFbFFF1163ce4e7c4f907f136
+ *   MODERATOR_ADDRESS_2 – 0xE06C3F820586b4e31C001565b4eB9D18fBB0C0C7
+ *   MODERATOR_ADDRESS_3 – 0x52e0ec9dcfF2FF7082927414cEe58F4Aac976C03
  *
  * Usage:
  *   forge script script/GrantRolesTestnet.s.sol --rpc-url https://sepolia.base.org --broadcast
@@ -27,10 +25,9 @@ contract GrantRolesTestnet is Script {
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address reviewer1   = vm.envAddress("REVIEWER_ADDRESS_1");
-        address reviewer2   = vm.envAddress("REVIEWER_ADDRESS_2");
         address moderator1  = vm.envAddress("MODERATOR_ADDRESS_1");
         address moderator2  = vm.envAddress("MODERATOR_ADDRESS_2");
+        address moderator3  = vm.envAddress("MODERATOR_ADDRESS_3");
 
         CovertProtocol protocol = CovertProtocol(PROTOCOL);
         CovertBadges   badges   = CovertBadges(BADGES);
@@ -41,16 +38,6 @@ contract GrantRolesTestnet is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // ── Reviewer 1 ──
-        protocol.grantRole(protocol.REVIEWER_ROLE(), reviewer1);
-        badges.mintBadge(reviewer1, CovertBadges.BadgeType.REVIEWER_BADGE);
-        console.log("[OK] Reviewer 1:", reviewer1);
-
-        // ── Reviewer 2 ──
-        protocol.grantRole(protocol.REVIEWER_ROLE(), reviewer2);
-        badges.mintBadge(reviewer2, CovertBadges.BadgeType.REVIEWER_BADGE);
-        console.log("[OK] Reviewer 2:", reviewer2);
-
         // ── Moderator 1 ──
         protocol.grantRole(protocol.MODERATOR_ROLE(), moderator1);
         badges.mintBadge(moderator1, CovertBadges.BadgeType.MODERATOR_BADGE);
@@ -60,6 +47,11 @@ contract GrantRolesTestnet is Script {
         protocol.grantRole(protocol.MODERATOR_ROLE(), moderator2);
         badges.mintBadge(moderator2, CovertBadges.BadgeType.MODERATOR_BADGE);
         console.log("[OK] Moderator 2:", moderator2);
+
+        // ── Moderator 3 ──
+        protocol.grantRole(protocol.MODERATOR_ROLE(), moderator3);
+        badges.mintBadge(moderator3, CovertBadges.BadgeType.MODERATOR_BADGE);
+        console.log("[OK] Moderator 3:", moderator3);
 
         vm.stopBroadcast();
 

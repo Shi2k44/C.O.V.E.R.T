@@ -18,55 +18,34 @@
  *   9  0xa0Ee7A142d267C1f36714E4a8F75612F20a79720  — moderator
  */
 
-export type PlatformRole = 'user' | 'reviewer' | 'moderator';
+export type PlatformRole = 'user' | 'moderator';
 
-// All comparisons use lowercase addresses
-const REVIEWER_ADDRESSES = new Set([
-    '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc', // Account 2
-    '0x15d34aaf54267db7d7c367839aaf71a00a2c6a65', // Account 4
-]);
-
+// All comparisons use lowercase addresses.
+// These are the testnet moderator accounts (Base Sepolia).
 const MODERATOR_ADDRESSES = new Set([
-    '0x90f79bf6eb2c4f870365e785982e1f101e93b906', // Account 3
-    '0x976ea74026e726554db657fa54763abd0c3a0aa9', // Account 6
-    '0xa0ee7a142d267c1f36714e4a8f75612f20a79720', // Account 9
+    '0xa429c534cf66a83bfbfff1163ce4e7c4f907f136', // Moderator 1
+    '0xe06c3f820586b4e31c001565b4eb9d18fbb0c0c7', // Moderator 2
+    '0x52e0ec9dcff2ff7082927414cee58f4aac976c03', // Moderator 3
 ]);
 
 export function getAddressRole(address: string): PlatformRole {
     const lower = address.toLowerCase();
     if (MODERATOR_ADDRESSES.has(lower)) return 'moderator';
-    if (REVIEWER_ADDRESSES.has(lower)) return 'reviewer';
     return 'user';
-}
-
-export function isReviewerAddress(address: string): boolean {
-    return REVIEWER_ADDRESSES.has(address.toLowerCase());
 }
 
 export function isModeratorAddress(address: string): boolean {
     return MODERATOR_ADDRESSES.has(address.toLowerCase());
 }
 
-/**
- * Minimum review requirements before a report is considered fully assessed.
- *   - At least 1 distinct reviewer must submit a decision.
- *   - At least 2 distinct moderators must finalize.
- */
-export const REVIEW_REQUIREMENTS = {
-    minReviewers: 1,
-    minModerators: 2,
-} as const;
-
 /** Human-readable role label. */
 export const ROLE_LABELS: Record<PlatformRole, string> = {
     user: 'Reporter',
-    reviewer: 'Reviewer',
     moderator: 'Protocol Moderator',
 };
 
-/** Orange-tinted badge classes per role. */
+/** Badge classes per role. */
 export const ROLE_BADGE_STYLES: Record<PlatformRole, string> = {
     user: 'bg-neutral-800 text-neutral-300',
-    reviewer: 'bg-blue-900/40 text-blue-400',
     moderator: 'bg-purple-900/40 text-purple-400',
 };
