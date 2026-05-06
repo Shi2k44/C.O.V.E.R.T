@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # ===== CORS =====
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "https://covert-chi.vercel.app"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "https://covert-chi.vercel.app", "https://c-o-v-e-r-t.vercel.app"]
 
     # ===== Database =====
     DATABASE_URL: str = "postgresql+asyncpg://covert_user:covert_password@localhost:5432/covert_db"
@@ -81,10 +81,10 @@ class Settings(BaseSettings):
             origins = [origin.strip() for origin in v.split(",")]
         else:
             origins = list(v)
-        # Always include the production frontend
-        vercel = "https://covert-chi.vercel.app"
-        if vercel not in origins:
-            origins.append(vercel)
+        # Always include production frontend URLs
+        for vercel in ["https://covert-chi.vercel.app", "https://c-o-v-e-r-t.vercel.app"]:
+            if vercel not in origins:
+                origins.append(vercel)
         return origins
 
     class Config:
