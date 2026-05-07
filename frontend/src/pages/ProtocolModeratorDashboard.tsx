@@ -1045,6 +1045,7 @@ export function ProtocolModeratorDashboard() {
                         const _token = localStorage.getItem('token');
                         const _addr = localStorage.getItem('wallet_address');
                         const dbRes = await fetch(`${API_BASE}/api/v1/reports/all?limit=500`, {
+                            cache: 'no-store',
                             headers: {
                                 ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
                                 ...(_addr ? { 'X-Wallet-Address': _addr } : {}),
@@ -1097,6 +1098,7 @@ export function ProtocolModeratorDashboard() {
                 // Fall back to backend DB — shows all reports from all wallets
                 const _token = localStorage.getItem('token');
                 const res = await fetch(`${API_BASE}/api/v1/reports/all?limit=100`, {
+                    cache: 'no-store',
                     headers: {
                         ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
                         ...(moderatorAddress ? { 'X-Wallet-Address': moderatorAddress } : {}),
