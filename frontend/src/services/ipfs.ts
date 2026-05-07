@@ -69,6 +69,7 @@ class IPFSService implements IIPFSService {
   private web3StorageToken: string = '';
   private pinataApiKey: string = '';
   private pinataSecretKey: string = '';
+  private pinataJwt: string = '';
   private localGateway: string = IPFS_CONFIG.GATEWAY_URL;
 
   /**
@@ -79,6 +80,7 @@ class IPFSService implements IIPFSService {
     web3StorageToken?: string;
     pinataApiKey?: string;
     pinataSecretKey?: string;
+    pinataJwt?: string;
     localGateway?: string;
   }): void {
     if (config.nftStorageToken) {
@@ -92,6 +94,9 @@ class IPFSService implements IIPFSService {
     }
     if (config.pinataSecretKey) {
       this.pinataSecretKey = config.pinataSecretKey;
+    }
+    if (config.pinataJwt) {
+      this.pinataJwt = config.pinataJwt;
     }
     if (config.localGateway) {
       this.localGateway = config.localGateway;
@@ -122,7 +127,7 @@ class IPFSService implements IIPFSService {
     // network attempts and return a deterministic fake CID immediately.
     // This avoids waiting for connection timeouts against localhost:5001.
     const isDevMode = import.meta.env.VITE_DEV_MODE === 'true';
-    const hasRealService = !!(this.pinataApiKey || this.nftStorageToken || this.web3StorageToken);
+    const hasRealService = !!(this.pinataJwt || this.pinataApiKey || this.nftStorageToken || this.web3StorageToken);
     if (isDevMode && !hasRealService) {
       console.warn(
         '[DEV MODE] No IPFS tokens configured — using simulated CID. ' +
@@ -150,10 +155,22 @@ class IPFSService implements IIPFSService {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Try Pinata first, then NFT.Storage, then web3.storage, then local
+    // Try Pinata JWT → Pinata key/secret → NFT.Storage → web3.storage → local
     let lastError: Error | undefined;
+    const tried: string[] = [];
+
+    if (this.pinataJwt) {
+      tried.push('Pinata-JWT');
+      try {
+        return await this.uploadToPinataJwt(blob, onProgress);
+      } catch (error) {
+        console.warn('Pinata JWT upload failed, trying fallback:', error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
 
     if (this.pinataApiKey && this.pinataSecretKey) {
+      tried.push('Pinata-Key');
       try {
         return await this.uploadToPinata(blob, onProgress);
       } catch (error) {
@@ -163,6 +180,7 @@ class IPFSService implements IIPFSService {
     }
 
     if (this.nftStorageToken) {
+      tried.push('NFT.Storage');
       try {
         return await this.uploadToNFTStorage(blob, onProgress);
       } catch (error) {
@@ -172,6 +190,7 @@ class IPFSService implements IIPFSService {
     }
 
     if (this.web3StorageToken) {
+      tried.push('web3.storage');
       try {
         return await this.uploadToWeb3Storage(blob, onProgress);
       } catch (error) {
@@ -180,17 +199,21 @@ class IPFSService implements IIPFSService {
       }
     }
 
-    try {
-      return await this.uploadToLocalIPFS(blob, onProgress);
-    } catch (error) {
-      console.warn('Local IPFS upload failed:', error);
-      lastError = error instanceof Error ? error : new Error(String(error));
+    if (tried.length === 0) {
+      tried.push('local-IPFS');
+      try {
+        return await this.uploadToLocalIPFS(blob, onProgress);
+      } catch (error) {
+        console.warn('Local IPFS upload failed:', error);
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
     }
 
     throw new Error(
-      `IPFS upload failed: All upload methods failed. ` +
-      `Configure VITE_NFT_STORAGE_TOKEN / VITE_WEB3_STORAGE_TOKEN or run a local IPFS node. ` +
-      `(Last error: ${lastError?.message ?? 'unknown'})`
+      `IPFS upload failed. Tried: [${tried.join(', ')}]. ` +
+      (tried.length === 0
+        ? 'No IPFS tokens configured. Set VITE_PINATA_JWT in Vercel env vars.'
+        : `Last error: ${lastError?.message ?? 'unknown'}`)
     );
   }
 
@@ -269,6 +292,52 @@ class IPFSService implements IIPFSService {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Pinata error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    if (onProgress) {
+      onProgress({ loaded: totalSize, total: totalSize, percentage: 100 });
+    }
+
+    return {
+      cid: result.IpfsHash,
+      gatewayUrl: `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`,
+      size: totalSize,
+    };
+  }
+
+  /**
+   * Upload to Pinata using JWT (modern auth — single token)
+   */
+  private async uploadToPinataJwt(
+    blob: Blob,
+    onProgress?: (progress: IPFSUploadProgress) => void
+  ): Promise<IPFSUploadResult> {
+    const totalSize = blob.size;
+
+    if (onProgress) {
+      onProgress({ loaded: 0, total: totalSize, percentage: 0 });
+    }
+
+    const formData = new FormData();
+    formData.append('file', blob, `report_${Date.now()}.json`);
+    formData.append('pinataMetadata', JSON.stringify({ name: `covert-report-${Date.now()}` }));
+
+    const response = await this.fetchWithRetry(
+      'https://api.pinata.cloud/pinning/pinFileToIPFS',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.pinataJwt}`,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Pinata JWT error: ${response.status} - ${errorText}`);
     }
 
     const result = await response.json();
@@ -618,10 +687,11 @@ class IPFSService implements IIPFSService {
 export const ipfsService = new IPFSService();
 
 // Auto-configure from Vite env variables at import time
-console.log('[IPFS] VITE_PINATA_API_KEY:', import.meta.env.VITE_PINATA_API_KEY ? 'SET (' + import.meta.env.VITE_PINATA_API_KEY.slice(0, 6) + '...)' : 'EMPTY');
-console.log('[IPFS] VITE_PINATA_SECRET_KEY:', import.meta.env.VITE_PINATA_SECRET_KEY ? 'SET' : 'EMPTY');
+console.log('[IPFS] VITE_PINATA_JWT:', import.meta.env.VITE_PINATA_JWT ? 'SET' : 'EMPTY');
+console.log('[IPFS] VITE_PINATA_API_KEY:', import.meta.env.VITE_PINATA_API_KEY ? 'SET' : 'EMPTY');
 console.log('[IPFS] VITE_DEV_MODE:', import.meta.env.VITE_DEV_MODE);
 ipfsService.configure({
+  pinataJwt: import.meta.env.VITE_PINATA_JWT || '',
   pinataApiKey: import.meta.env.VITE_PINATA_API_KEY || '',
   pinataSecretKey: import.meta.env.VITE_PINATA_SECRET_KEY || '',
   nftStorageToken: import.meta.env.VITE_NFT_STORAGE_TOKEN || '',
