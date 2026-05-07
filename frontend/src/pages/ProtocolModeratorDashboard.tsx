@@ -1040,6 +1040,7 @@ export function ProtocolModeratorDashboard() {
                     // Fetch DB records to cross-reference — only show reports that
                     // exist in the DB (post-wipe). Old on-chain-only reports are hidden.
                     let dbHashSet = new Set<string>();
+                    let dbFetched = false;
                     try {
                         const _token = localStorage.getItem('token');
                         const _addr = localStorage.getItem('wallet_address');
@@ -1056,11 +1057,14 @@ export function ProtocolModeratorDashboard() {
                                     (r.cid_hash || '').toLowerCase()
                                 )
                             );
+                            dbFetched = true; // fetch succeeded (even if DB is empty)
                         }
                     } catch { /* ignore — if DB unreachable, show all */ }
 
-                    // Filter blockchain reports to those that exist in DB
-                    const knownReports = dbHashSet.size > 0
+                    // Filter blockchain reports to those that exist in DB.
+                    // If dbFetched is true but set is empty, DB has been wiped → show nothing.
+                    // Only skip filtering if the DB fetch itself failed.
+                    const knownReports = dbFetched
                         ? rawReports.filter((r) => dbHashSet.has((r.contentHash || '').toLowerCase()))
                         : rawReports;
 
