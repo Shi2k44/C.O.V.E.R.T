@@ -1040,7 +1040,9 @@ export function ProtocolModeratorDashboard() {
                     // Fetch DB records to cross-reference — only show reports that
                     // exist in the DB (post-wipe). Old on-chain-only reports are hidden.
                     let dbHashSet = new Set<string>();
-                    let dbFetched = false;
+                    // Default true: if DB check fails for any reason, show nothing
+                    // (never fall back to showing unverified blockchain-only reports)
+                    let dbFetched = true;
                     try {
                         const _token = localStorage.getItem('token');
                         const _addr = localStorage.getItem('wallet_address');
@@ -1058,9 +1060,8 @@ export function ProtocolModeratorDashboard() {
                                     (r.cid_hash || '').toLowerCase()
                                 )
                             );
-                            dbFetched = true; // fetch succeeded (even if DB is empty)
                         }
-                    } catch { /* ignore — if DB unreachable, show all */ }
+                    } catch { /* DB unreachable — dbFetched=true + empty set = show nothing */ }
 
                     // Filter blockchain reports to those that exist in DB.
                     // If dbFetched is true but set is empty, DB has been wiped → show nothing.
