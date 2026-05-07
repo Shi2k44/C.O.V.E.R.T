@@ -721,10 +721,7 @@ export function ReportDetailPage() {
         <AppealPanel report={report} />
       )}
 
-      {/* Dead Man's Switch — only shown when report belongs to the current user */}
-      {reports.some((r) => r.id === report.id) && (
-        <DeadMansSwitchPanel reportId={report.id} />
-      )}
+      {/* Dead Man's Switch is configured during submission only */}
     </div>
   );
 }

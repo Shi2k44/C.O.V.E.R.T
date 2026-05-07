@@ -190,14 +190,8 @@ export function useRoleAccess() {
     const onRepRefresh = () => { loadRoles(true); };
     window.addEventListener('covert:rep-refresh', onRepRefresh);
 
-    // Poll every 60s silently — no loading spinner
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadRoles(true);
-    }, 60_000);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
       window.removeEventListener('covert:rep-refresh', onRepRefresh);
     };
   }, [walletState.connected, walletState.address]);

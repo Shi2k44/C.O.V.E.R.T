@@ -340,13 +340,7 @@ export function ReporterDashboard() {
     return () => window.removeEventListener('covert:reports-updated', fetchPublic);
   }, [fetchPublic]);
 
-  // Poll public feed every 30s for cross-browser updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchPublic();
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [fetchPublic]);
+  // No auto-poll — user can manually refresh with the button
 
   const visibleReports = publicReports;
 
