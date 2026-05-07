@@ -183,6 +183,9 @@ class Report(Base):
     # Department routing — user-selected Bangalore govt department
     department = Column(String(200))
 
+    # Moderator assignment — one random moderator assigned at submission time
+    assigned_moderator = Column(String(42))  # wallet address of assigned moderator
+
     # Re-appeal tracking
     appeal_round = Column(Integer, nullable=False, default=0)
     appeal_mod_1 = Column(String(42))        # First moderator assigned to re-appeal

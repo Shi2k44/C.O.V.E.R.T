@@ -9,6 +9,7 @@ from typing import Optional, List, Tuple
 from datetime import datetime, timedelta
 from uuid import UUID
 import logging
+import random
 
 from app.models.report import Report, ReportStatus, ReportVisibility, ReportLog, LogEventType
 from app.core.config import settings
@@ -18,6 +19,23 @@ logger = logging.getLogger(__name__)
 
 class ReportService:
     """Service for managing reports"""
+
+    def _pick_random_moderator(self) -> Optional[str]:
+        """Pick a random moderator wallet from MODERATOR_ADDRESSES config."""
+        raw = getattr(settings, "MODERATOR_ADDRESSES", "")
+        mods = [m.strip().lower() for m in raw.split(",") if m.strip()]
+        if not mods:
+            return None
+        return random.choice(mods)
+
+    def _pick_appeal_moderators(self, exclude: Optional[str]) -> List[str]:
+        """Pick 2 moderators for a re-appeal, excluding the original moderator."""
+        raw = getattr(settings, "MODERATOR_ADDRESSES", "")
+        mods = [m.strip().lower() for m in raw.split(",") if m.strip()]
+        if exclude:
+            mods = [m for m in mods if m != exclude.lower()]
+        random.shuffle(mods)
+        return mods[:2]
 
     async def create_report(
         self,
@@ -43,6 +61,9 @@ class ReportService:
                 2: ReportVisibility.PUBLIC,
             }
             vis_enum = visibility_map.get(visibility, ReportVisibility.MODERATED)
+
+            # Assign a random moderator to handle this report
+            assigned_mod = self._pick_random_moderator()
 
             report = Report(
                 # IPFS storage — model uses ipfs_cid, not cid
@@ -70,6 +91,8 @@ class ReportService:
                 status=ReportStatus.PENDING_MODERATION,
                 # User-selected Bangalore dept for routing
                 department=department,
+                # Randomly assigned moderator
+                assigned_moderator=assigned_mod,
             )
 
             db.add(report)
@@ -169,10 +192,17 @@ class ReportService:
         category: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        moderator_wallet: Optional[str] = None,
     ) -> Tuple[List[Report], int]:
-        """Get all non-deleted reports (no ownership filter). For reviewer/moderator access."""
+        """Get reports assigned to a moderator (or all if no wallet given). For moderator access."""
         try:
             query = select(Report).where(Report.deleted_at.is_(None))
+
+            # Filter to only reports assigned to this moderator
+            if moderator_wallet:
+                query = query.where(
+                    Report.assigned_moderator == moderator_wallet.lower()
+                )
 
             if status:
                 try:

@@ -280,6 +280,7 @@ async def list_all_reports(
         category=category,
         limit=limit,
         offset=offset,
+        moderator_wallet=wallet,
     )
 
     items = [
@@ -303,6 +304,7 @@ async def list_all_reports(
             reporter=r.reporter_nullifier,
             department=r.department,
             appeal_round=r.appeal_round or 0,
+            assigned_moderator=r.assigned_moderator,
         )
         for r in reports
     ]
@@ -488,9 +490,11 @@ async def re_appeal_report(
 
     report.status = ReportStatus.APPEALED
     report.appeal_round = (report.appeal_round or 0) + 1
+    # Assign 2 different moderators (not the original) for this appeal round
+    appeal_mods = report_service._pick_appeal_moderators(report.original_moderator)
+    report.appeal_mod_1 = appeal_mods[0] if len(appeal_mods) > 0 else None
+    report.appeal_mod_2 = appeal_mods[1] if len(appeal_mods) > 1 else None
     # Reset appeal decisions for the new round
-    report.appeal_mod_1 = None
-    report.appeal_mod_2 = None
     report.appeal_decision_1 = None
     report.appeal_decision_2 = None
     await db.commit()
@@ -540,19 +544,34 @@ async def appeal_decide(
             detail="The original moderator cannot decide on a re-appeal of their own decision."
         )
 
-    # Assign slots
-    if not report.appeal_mod_1 or report.appeal_mod_1.lower() == mod:
-        # Fill slot 1 (or update if same mod revisits before slot 2 is filled)
-        report.appeal_mod_1 = mod
+    # Check if this moderator is one of the two pre-assigned appeal moderators
+    assigned_mods = []
+    if report.appeal_mod_1:
+        assigned_mods.append(report.appeal_mod_1.lower())
+    if report.appeal_mod_2:
+        assigned_mods.append(report.appeal_mod_2.lower())
+
+    if assigned_mods and mod not in assigned_mods:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not assigned to decide on this appeal."
+        )
+
+    # Record decision in the correct slot
+    if report.appeal_mod_1 and mod == report.appeal_mod_1.lower():
         report.appeal_decision_1 = body.decision
-    elif not report.appeal_mod_2 or report.appeal_mod_2.lower() == mod:
-        # Fill slot 2 (different mod)
-        if report.appeal_mod_1 and mod == report.appeal_mod_1.lower():
-            raise HTTPException(status_code=400, detail="You already submitted a decision for this appeal.")
-        report.appeal_mod_2 = mod
+    elif report.appeal_mod_2 and mod == report.appeal_mod_2.lower():
         report.appeal_decision_2 = body.decision
     else:
-        raise HTTPException(status_code=400, detail="Both appeal slots are already filled.")
+        # Fallback: fill first available slot (shouldn't normally reach here)
+        if not report.appeal_decision_1:
+            report.appeal_mod_1 = mod
+            report.appeal_decision_1 = body.decision
+        elif not report.appeal_decision_2:
+            report.appeal_mod_2 = mod
+            report.appeal_decision_2 = body.decision
+        else:
+            raise HTTPException(status_code=400, detail="Both appeal slots are already filled.")
 
     await db.commit()
 

@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     COV_CREDITS_ADDRESS: str = ""
     COVERT_BADGES_ADDRESS: str = ""
     COVERT_PROTOCOL_ADDRESS: str = ""
-    AUTOMATION_PRIVATE_KEY: str = ""  # Private key for AUTOMATION_ROLE signer (reviewer role management)
+    AUTOMATION_PRIVATE_KEY: str = ""
+    # Comma-separated list of moderator wallet addresses (lowercase).
+    # Used to randomly assign one moderator per report at submission time.
+    MODERATOR_ADDRESSES: str = "0xa429c534cf66a83bfbfff1163ce4e7c4f907f136,0xe06c3f820586b4e31c001565b4eb9d18fbb0c0c7,0x52e0ec9dcff2ff7082927414cee58f4aac976c03"
 
     # ===== Rate Limiting =====
     RATE_LIMIT_SUBMISSIONS: int = 10  # per hour

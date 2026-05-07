@@ -87,6 +87,7 @@ class ReportListItem(BaseModel):
     final_label: Optional[str] = None  # 'CORROBORATED' | 'NEEDS_EVIDENCE' | 'DISPUTED' | 'FALSE_OR_MANIPULATED'
     department: Optional[str] = None
     appeal_round: Optional[int] = 0
+    assigned_moderator: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
