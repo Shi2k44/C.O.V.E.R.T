@@ -12,7 +12,6 @@
 
 import { useState } from 'react';
 import {
-    DocumentArrowDownIcon,
     PhotoIcon,
     DocumentIcon,
     EyeIcon,
@@ -50,15 +49,16 @@ function formatSize(bytes: number): string {
 
 function AttachmentCard({ attachment }: { attachment: Attachment }) {
     const isImage = attachment.mimeType.startsWith('image/');
+    const isVideo = attachment.mimeType.startsWith('video/');
     const isPDF = attachment.mimeType === 'application/pdf';
-    const dataUrl = `data:${attachment.mimeType};base64,${attachment.content}`;
+    const isAudio = attachment.mimeType.startsWith('audio/');
 
-    const handleDownload = () => {
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = attachment.filename;
-        link.click();
-    };
+    // Use blob URLs for media — more memory-efficient and avoids data: URI size limits
+    const blobUrl = (() => {
+        const bytes = Uint8Array.from(atob(attachment.content), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: attachment.mimeType });
+        return URL.createObjectURL(blob);
+    })();
 
     return (
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden">
@@ -66,7 +66,7 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
             {isImage && (
                 <div className="bg-neutral-950 border-b border-neutral-800 flex items-center justify-center max-h-64 overflow-hidden">
                     <img
-                        src={dataUrl}
+                        src={blobUrl}
                         alt={attachment.filename}
                         className="max-h-64 max-w-full object-contain"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -74,7 +74,35 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
                 </div>
             )}
 
-            {/* File info row */}
+            {/* Video player */}
+            {isVideo && (
+                <div className="bg-neutral-950 border-b border-neutral-800">
+                    <video
+                        src={blobUrl}
+                        controls
+                        controlsList="nodownload"
+                        onContextMenu={(e) => e.preventDefault()}
+                        className="w-full max-h-96"
+                    >
+                        Your browser does not support video playback.
+                    </video>
+                </div>
+            )}
+
+            {/* Audio player */}
+            {isAudio && (
+                <div className="bg-neutral-950 border-b border-neutral-800 p-3">
+                    <audio
+                        src={blobUrl}
+                        controls
+                        controlsList="nodownload"
+                        onContextMenu={(e) => e.preventDefault()}
+                        className="w-full"
+                    />
+                </div>
+            )}
+
+            {/* File info row — no download button */}
             <div className="p-3 flex items-center gap-3">
                 <div className="p-2 bg-neutral-800 rounded-lg shrink-0">
                     {isImage
@@ -86,25 +114,14 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
                     <p className="text-sm font-medium text-white truncate">{attachment.filename}</p>
                     <p className="text-xs text-neutral-500">{attachment.mimeType} · {formatSize(attachment.size)}</p>
                 </div>
-                <button
-                    onClick={handleDownload}
-                    title="Download file"
-                    className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors shrink-0"
-                >
-                    <DocumentArrowDownIcon className="h-5 w-5" />
-                </button>
             </div>
 
-            {/* PDF open link — use blob URL; browsers block data: URL navigation */}
+            {/* PDF open link — opens in new tab for viewing only */}
             {isPDF && (
                 <div className="px-3 pb-3">
                     <button
                         onClick={() => {
-                            const bytes = Uint8Array.from(atob(attachment.content), c => c.charCodeAt(0));
-                            const blob = new Blob([bytes], { type: attachment.mimeType });
-                            const url = URL.createObjectURL(blob);
-                            window.open(url, '_blank', 'noopener,noreferrer');
-                            setTimeout(() => URL.revokeObjectURL(url), 10000);
+                            window.open(blobUrl, '_blank', 'noopener,noreferrer');
                         }}
                         className="text-xs text-neutral-400 hover:text-white underline"
                     >

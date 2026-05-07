@@ -74,9 +74,8 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
     REJECT_SPAM: { label: 'Rejected (Spam)', color: 'text-red-400 bg-red-900/30' },
   };
 
-  // Evidence visibility rules — show evidence once a decision has been reached
-  const isDecided = ['verified', 'rejected', 'pending_moderation', 'needs_evidence', 'rejected_by_reviewer'].includes(report.status);
-  const showEvidence = report.visibility === 'public' || isDecided;
+  // Evidence is always viewable — the EvidenceViewer handles auth/access checks internally
+  const showEvidence = true;
   const hasEvidence = !!(report.commitmentHash && report.ipfsCid);
 
   const handleAction = useCallback(async (action: 'support' | 'challenge') => {

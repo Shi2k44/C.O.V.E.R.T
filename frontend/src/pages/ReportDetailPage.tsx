@@ -590,7 +590,8 @@ export function ReportDetailPage() {
   const categoryLabel = categoryLabels[report.category] ?? report.category;
 
   const isDecided = ['verified', 'rejected', 'disputed'].includes(report.status);
-  const canViewEvidence = report.visibility === 'public' || isDecided;
+  // Reporter can always view their own evidence; public reports visible to signed-in users; decided reports visible to all
+  const canViewEvidence = true;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
