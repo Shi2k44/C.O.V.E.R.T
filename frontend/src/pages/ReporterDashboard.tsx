@@ -135,6 +135,17 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
         toast.error('Transaction rejected');
       } else if (msg.includes('0x43fb9453') || msg.toLowerCase().includes('insufficientcredits')) {
         toast.error('Insufficient COV credits for this action.');
+      } else if (msg.includes('0xbbf402e2') || msg.toLowerCase().includes('alreadysupported')) {
+        toast('You have already supported this report.', { icon: '👍' });
+        setHasActed('support');
+      } else if (msg.includes('0x') && msg.toLowerCase().includes('alreadychallenge')) {
+        toast('You have already challenged this report.', { icon: '⚡' });
+        setHasActed('challenge');
+      } else if (msg.includes('execution reverted')) {
+        // Generic revert — likely already acted
+        const alreadyActed = action === 'support' ? 'supported' : 'challenged';
+        toast(`You have already ${alreadyActed} this report.`, { icon: action === 'support' ? '👍' : '⚡' });
+        setHasActed(action);
       } else {
         toast.error(`Failed to ${action}: ${msg}`);
       }
