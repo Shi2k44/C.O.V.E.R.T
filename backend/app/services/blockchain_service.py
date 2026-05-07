@@ -144,6 +144,13 @@ COVERT_PROTOCOL_ABI = json.loads("""
         "outputs": [{"name": "", "type": "bytes32"}],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "MODERATOR_ROLE",
+        "outputs": [{"name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+        "type": "function"
     }
 ]
 """)
