@@ -1028,136 +1028,113 @@ export function ProtocolModeratorDashboard() {
         if (!isConnected) return;
         setLoading(true);
         try {
-            let usedBlockchain = false;
+            // ── DB is the primary source (backend-first submission flow) ──
+            // Blockchain data is used to enrich (support/challenge counts) when available.
+            const _token = localStorage.getItem('token');
+            const _addr = localStorage.getItem('wallet_address');
 
-            // Try blockchain first
+            const DB_REVIEW_DECISION: Record<string, ReviewerDecision> = {
+                'REVIEW_PASSED': ReviewerDecision.REVIEW_PASSED,
+                'NEEDS_EVIDENCE': ReviewerDecision.NEEDS_EVIDENCE,
+                'REJECT_SPAM': ReviewerDecision.REJECT_SPAM,
+            };
+            const DB_STATUS_TO_FINAL_LABEL: Record<string, FinalLabel> = {
+                'verified': FinalLabel.CORROBORATED,
+                'rejected': FinalLabel.FALSE_OR_MANIPULATED,
+                'disputed': FinalLabel.DISPUTED,
+                'needs_evidence': FinalLabel.NEEDS_EVIDENCE,
+            };
+            const STATUS_TO_REVIEW_DECISION: Record<string, ReviewerDecision> = {
+                'pending_moderation': ReviewerDecision.REVIEW_PASSED,
+                'appealed': ReviewerDecision.REVIEW_PASSED,
+                'under_review': ReviewerDecision.REVIEW_PASSED,
+                'needs_evidence': ReviewerDecision.NEEDS_EVIDENCE,
+                'rejected_by_reviewer': ReviewerDecision.REJECT_SPAM,
+            };
+
+            const dbRes = await fetch(`${API_BASE}/api/v1/reports/all?limit=500`, {
+                cache: 'no-store',
+                headers: {
+                    ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
+                    ...(_addr ? { 'X-Wallet-Address': _addr } : {}),
+                },
+            });
+
+            if (!dbRes.ok) {
+                toast.error(`Failed to load reports (${dbRes.status})`);
+                return;
+            }
+
+            const dbData = await dbRes.json();
+            const dbItems = dbData.items || [];
+
+            // Build a map of cid_hash → DB report for blockchain enrichment
+            const dbHashMap = new Map<string, typeof dbItems[0]>();
+            for (const r of dbItems) {
+                if (r.cid_hash) dbHashMap.set(r.cid_hash.toLowerCase(), r);
+            }
+
+            // Try to enrich with blockchain data (support/challenge counts)
+            let chainMap = new Map<string, { id: number; supportCount: number; challengeCount: number; hasAppeal: boolean; appealReasonHash: string; lockedReportStake: bigint }>();
             try {
                 await protocolService.connect();
                 const count = await protocolService.getReportCount();
                 const rawReports = await protocolService.getReportsInRange(0, count);
-
-                if (rawReports.length > 0) {
-                    // Fetch DB records to cross-reference — only show reports that
-                    // exist in the DB (post-wipe). Old on-chain-only reports are hidden.
-                    let dbHashSet = new Set<string>();
-                    // Default true: if DB check fails for any reason, show nothing
-                    // (never fall back to showing unverified blockchain-only reports)
-                    let dbFetched = true;
-                    try {
-                        const _token = localStorage.getItem('token');
-                        const _addr = localStorage.getItem('wallet_address');
-                        const dbRes = await fetch(`${API_BASE}/api/v1/reports/all?limit=500`, {
-                            cache: 'no-store',
-                            headers: {
-                                ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
-                                ...(_addr ? { 'X-Wallet-Address': _addr } : {}),
-                            },
-                        });
-                        if (dbRes.ok) {
-                            const dbData = await dbRes.json();
-                            dbHashSet = new Set(
-                                (dbData.items || []).map((r: { cid_hash?: string }) =>
-                                    (r.cid_hash || '').toLowerCase()
-                                )
-                            );
-                        }
-                    } catch {
-                        // DB unreachable — dbFetched=true + empty set = show nothing
-                        toast.error('Could not reach the database. Queue may appear empty — please refresh.');
-                    }
-
-                    // Filter blockchain reports to those that exist in DB.
-                    // If dbFetched is true but set is empty, DB has been wiped → show nothing.
-                    // Only skip filtering if the DB fetch itself failed.
-                    const knownReports = dbFetched
-                        ? rawReports.filter((r) => dbHashSet.has((r.contentHash || '').toLowerCase()))
-                        : rawReports;
-
-                    const enriched = await Promise.all(knownReports.map(async (r) => {
+                for (const r of rawReports) {
+                    const hash = (r.contentHash || '').toLowerCase();
+                    if (dbHashMap.has(hash)) {
                         const [sc, cc] = await Promise.all([
                             protocolService.getSupporterCount(r.id),
                             protocolService.getChallengerCount(r.id),
                         ]);
-                        return {
-                            ...r,
-                            visibility: r.visibility === 0 ? 'PUBLIC' : 'PRIVATE' as 'PUBLIC' | 'PRIVATE',
+                        chainMap.set(hash, {
+                            id: r.id,
                             supportCount: sc,
                             challengeCount: cc,
-                            supporters: [],
-                            challengers: [],
-                            stake: r.visibility === 0 ? STAKES.REPORT_PUBLIC : STAKES.REPORT_PRIVATE,
-                            appealBond: r.hasAppeal ? STAKES.APPEAL_BOND : 0,
-                        } as ModerableReport;
-                    }));
-                    setReports(enriched);
-                    setFromBlockchain(true);
-                    usedBlockchain = true;
+                            hasAppeal: r.hasAppeal,
+                            appealReasonHash: r.appealReasonHash,
+                            lockedReportStake: r.lockedReportStake ?? 0n,
+                        });
+                    }
                 }
+                setFromBlockchain(true);
             } catch {
-                // Blockchain unavailable — fall through to DB fetch
+                // Blockchain unavailable — DB-only mode is fine
+                setFromBlockchain(false);
             }
 
-            if (!usedBlockchain) {
-                setFromBlockchain(false);
-                // Fall back to backend DB — shows all reports from all wallets
-                const _token = localStorage.getItem('token');
-                const res = await fetch(`${API_BASE}/api/v1/reports/all?limit=100`, {
-                    cache: 'no-store',
-                    headers: {
-                        ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
-                        ...(moderatorAddress ? { 'X-Wallet-Address': moderatorAddress } : {}),
-                    },
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    const DB_REVIEW_DECISION: Record<string, ReviewerDecision> = {
-                        'REVIEW_PASSED': ReviewerDecision.REVIEW_PASSED,
-                        'NEEDS_EVIDENCE': ReviewerDecision.NEEDS_EVIDENCE,
-                        'REJECT_SPAM': ReviewerDecision.REJECT_SPAM,
-                    };
-                    // Map DB status → FinalLabel for display purposes
-                    const DB_STATUS_TO_FINAL_LABEL: Record<string, FinalLabel> = {
-                        'verified': FinalLabel.CORROBORATED,
-                        'rejected': FinalLabel.FALSE_OR_MANIPULATED,
-                        'disputed': FinalLabel.DISPUTED,
-                    };
-                    // Infer reviewDecision from DB status when review_decision field is absent
-                    const STATUS_TO_REVIEW_DECISION: Record<string, ReviewerDecision> = {
-                        'pending_moderation': ReviewerDecision.REVIEW_PASSED,
-                        'appealed': ReviewerDecision.REVIEW_PASSED,
-                        'under_review': ReviewerDecision.REVIEW_PASSED,
-                        'needs_evidence': ReviewerDecision.NEEDS_EVIDENCE,
-                        'rejected_by_reviewer': ReviewerDecision.REJECT_SPAM,
-                    };
-                    const dbReports: ModerableReport[] = (data.items || []).map(
-                        (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; status?: string; review_decision?: string }, idx: number) => ({
-                            id: idx + 1,
-                            reporter: r.reporter || '0x0000000000000000000000000000000000000000',
-                            visibility: r.visibility === 'public' ? 'PUBLIC' : 'PRIVATE' as 'PUBLIC' | 'PRIVATE',
-                            contentHash: r.cid_hash || '',
-                            finalLabel: (r.status && DB_STATUS_TO_FINAL_LABEL[r.status]) ?? FinalLabel.UNREVIEWED,
-                            reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision])
-                                ?? (r.status && STATUS_TO_REVIEW_DECISION[r.status])
-                                ?? ReviewerDecision.NONE,
-                            createdAt: r.submitted_at ? new Date(r.submitted_at).getTime() / 1000 : Date.now() / 1000,
-                            reviewedAt: 0,
-                            supportCount: 0,
-                            challengeCount: 0,
-                            supporters: [],
-                            challengers: [],
-                            hasAppeal: r.status === 'appealed',
-                            appealReasonHash: '',
-                            stake: r.visibility === 'public' ? STAKES.REPORT_PUBLIC : STAKES.REPORT_PRIVATE,
-                            appealBond: r.status === 'appealed' ? STAKES.APPEAL_BOND : 0,
-                            lockedReportStake: 0n,
-                            dbStatus: r.status,
-                        })
-                    );
-                    setReports(dbReports);
-                } else {
-                    toast.error('Failed to load reports');
+            // Build final report list from DB, enriched with chain data
+            const reports: ModerableReport[] = dbItems.map(
+                (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; status?: string; review_decision?: string; final_label?: string }, idx: number) => {
+                    const hash = (r.cid_hash || '').toLowerCase();
+                    const chain = chainMap.get(hash);
+                    return {
+                        id: chain?.id ?? (idx + 1),
+                        reporter: r.reporter || '0x0000000000000000000000000000000000000000',
+                        visibility: r.visibility === 'public' ? 'PUBLIC' : 'PRIVATE' as 'PUBLIC' | 'PRIVATE',
+                        contentHash: r.cid_hash || '',
+                        finalLabel: (r.final_label && DB_STATUS_TO_FINAL_LABEL[r.final_label.toLowerCase()])
+                            ?? (r.status && DB_STATUS_TO_FINAL_LABEL[r.status])
+                            ?? FinalLabel.UNREVIEWED,
+                        reviewDecision: (r.review_decision && DB_REVIEW_DECISION[r.review_decision])
+                            ?? (r.status && STATUS_TO_REVIEW_DECISION[r.status])
+                            ?? ReviewerDecision.NONE,
+                        createdAt: r.submitted_at ? new Date(r.submitted_at).getTime() / 1000 : Date.now() / 1000,
+                        reviewedAt: 0,
+                        supportCount: chain?.supportCount ?? 0,
+                        challengeCount: chain?.challengeCount ?? 0,
+                        supporters: [],
+                        challengers: [],
+                        hasAppeal: chain?.hasAppeal ?? (r.status === 'appealed'),
+                        appealReasonHash: chain?.appealReasonHash ?? '',
+                        stake: r.visibility === 'public' ? STAKES.REPORT_PUBLIC : STAKES.REPORT_PRIVATE,
+                        appealBond: (chain?.hasAppeal || r.status === 'appealed') ? STAKES.APPEAL_BOND : 0,
+                        lockedReportStake: chain?.lockedReportStake ?? 0n,
+                        dbStatus: r.status,
+                    } as ModerableReport;
                 }
-            }
+            );
+            setReports(reports);
         } catch (err) {
             console.error(err);
             setFromBlockchain(false);
