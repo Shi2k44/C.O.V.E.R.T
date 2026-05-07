@@ -690,11 +690,14 @@ async def get_evidence_key(
 
     is_reporter = (report.reporter_nullifier or "").lower() == wallet.lower()
 
+    # Public reports: any authenticated user can view evidence
+    vis = report.visibility.value if hasattr(report.visibility, 'value') else str(report.visibility)
+    is_public = vis == 'public'
+
     # Check moderator role (lazy — don't raise if check fails, just deny)
     is_moderator = False
-    if not is_reporter:
+    if not is_reporter and not is_public:
         try:
-            from app.api.v1.rbac import require_moderator_role
             from app.services.blockchain_service import blockchain_service
             if not blockchain_service.w3:
                 await blockchain_service.initialize()
@@ -704,7 +707,7 @@ async def get_evidence_key(
             if settings.DEBUG:
                 is_moderator = True
 
-    if not is_reporter and not is_moderator:
+    if not is_reporter and not is_public and not is_moderator:
         raise HTTPException(status_code=403, detail="Access denied — moderator role or report ownership required")
 
     if not report.evidence_key:
