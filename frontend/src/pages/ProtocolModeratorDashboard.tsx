@@ -64,6 +64,10 @@ interface ModerableReport {
     lockedReportStake: bigint;
     /** Original DB status — only set when reports come from DB fallback, not blockchain */
     dbStatus?: string;
+    /** Report title from DB */
+    title?: string;
+    /** Report description from DB */
+    description?: string;
 }
 
 interface WalletRepData {
@@ -418,7 +422,7 @@ function ConfirmFinalizeModal({
                         </button>
                     </div>
                     <p className="text-neutral-500 text-sm mt-1">
-                        Report #{report.id} · {FINAL_LABEL_NAMES[label]}
+                        {report.title || `Report`} · {FINAL_LABEL_NAMES[label]}
                         {appeal !== AppealOutcome.NONE && ` · ${APPEAL_OUTCOME_NAMES[appeal]}`}
                     </p>
                 </div>
@@ -583,7 +587,7 @@ function ReportCard({
                 <button className="flex-1 text-left" onClick={() => onSelect(report)}>
                     <div className="flex items-center justify-between flex-wrap gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-white">Report #{report.id}</span>
+                            <span className="text-sm font-bold text-white">{report.title || `Report`}</span>
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${FINAL_LABEL_COLORS[report.finalLabel]}`}>
                                 {FINAL_LABEL_NAMES[report.finalLabel]}
                             </span>
@@ -824,7 +828,7 @@ function ReportCard({
                                 style={{ backgroundColor: '#E84B1A', color: '#fff' }}
                             >
                                 <ShieldCheckIcon className="w-5 h-5" />
-                                Review & Finalize Report #{report.id}
+                                Review & Finalize {report.title || `Report`}
                             </button>
                         </>
                     ) : (
@@ -1105,7 +1109,7 @@ export function ProtocolModeratorDashboard() {
 
             // Build final report list from DB, enriched with chain data
             const reports: ModerableReport[] = dbItems.map(
-                (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; status?: string; review_decision?: string; final_label?: string }, idx: number) => {
+                (r: { reporter?: string; visibility: string; cid_hash?: string; submitted_at?: string; status?: string; review_decision?: string; final_label?: string; title?: string; description?: string }, idx: number) => {
                     const hash = (r.cid_hash || '').toLowerCase();
                     const chain = chainMap.get(hash);
                     return {
@@ -1131,6 +1135,8 @@ export function ProtocolModeratorDashboard() {
                         appealBond: (chain?.hasAppeal || r.status === 'appealed') ? STAKES.APPEAL_BOND : 0,
                         lockedReportStake: chain?.lockedReportStake ?? 0n,
                         dbStatus: r.status,
+                        title: r.title,
+                        description: r.description,
                     } as ModerableReport;
                 }
             );
@@ -1290,7 +1296,7 @@ export function ProtocolModeratorDashboard() {
                 );
             }
 
-            toast.success(`Report #${selectedReport.id} finalized as "${FINAL_LABEL_NAMES[finalLabel]}"`);
+            toast.success(`"${selectedReport.title || 'Report'}" finalized as "${FINAL_LABEL_NAMES[finalLabel]}"`);
             window.dispatchEvent(new CustomEvent('covert:reports-updated'));
             window.dispatchEvent(new CustomEvent('covert:rep-refresh'));
             setSelectedReport(null);
