@@ -1037,7 +1037,34 @@ export function ProtocolModeratorDashboard() {
                 const rawReports = await protocolService.getReportsInRange(0, count);
 
                 if (rawReports.length > 0) {
-                    const enriched = await Promise.all(rawReports.map(async (r) => {
+                    // Fetch DB records to cross-reference — only show reports that
+                    // exist in the DB (post-wipe). Old on-chain-only reports are hidden.
+                    let dbHashSet = new Set<string>();
+                    try {
+                        const _token = localStorage.getItem('token');
+                        const _addr = localStorage.getItem('wallet_address');
+                        const dbRes = await fetch(`${API_BASE}/api/v1/reports/all?limit=500`, {
+                            headers: {
+                                ...(_token ? { 'Authorization': `Bearer ${_token}` } : {}),
+                                ...(_addr ? { 'X-Wallet-Address': _addr } : {}),
+                            },
+                        });
+                        if (dbRes.ok) {
+                            const dbData = await dbRes.json();
+                            dbHashSet = new Set(
+                                (dbData.items || []).map((r: { cid_hash?: string }) =>
+                                    (r.cid_hash || '').toLowerCase()
+                                )
+                            );
+                        }
+                    } catch { /* ignore — if DB unreachable, show all */ }
+
+                    // Filter blockchain reports to those that exist in DB
+                    const knownReports = dbHashSet.size > 0
+                        ? rawReports.filter((r) => dbHashSet.has((r.contentHash || '').toLowerCase()))
+                        : rawReports;
+
+                    const enriched = await Promise.all(knownReports.map(async (r) => {
                         const [sc, cc] = await Promise.all([
                             protocolService.getSupporterCount(r.id),
                             protocolService.getChallengerCount(r.id),
