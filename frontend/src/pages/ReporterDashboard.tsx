@@ -80,7 +80,7 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
 
   const handleAction = useCallback(async (action: 'support' | 'challenge') => {
     if (!isConnected) { toast.error('Connect your wallet first'); return; }
-    if (hasActed) { toast.error(`You already ${hasActed}ed this report`); return; }
+    if (hasActed) { toast.error(`You already ${hasActed}ed this report`, { id: `already-${report.id}` }); return; }
 
     const requiredCov = action === 'support' ? STAKES.SUPPORT : STAKES.CHALLENGE;
 
@@ -136,15 +136,14 @@ function PublicReportCard({ report, isConnected }: { report: Report; isConnected
       } else if (msg.includes('0x43fb9453') || msg.toLowerCase().includes('insufficientcredits')) {
         toast.error('Insufficient COV credits for this action.');
       } else if (msg.includes('0xbbf402e2') || msg.toLowerCase().includes('alreadysupported')) {
-        toast('You have already supported this report.', { icon: '👍' });
+        toast('You have already supported this report.', { id: `already-${report.id}` });
         setHasActed('support');
       } else if (msg.includes('0x') && msg.toLowerCase().includes('alreadychallenge')) {
-        toast('You have already challenged this report.', { icon: '⚡' });
+        toast('You have already challenged this report.', { id: `already-${report.id}` });
         setHasActed('challenge');
       } else if (msg.includes('execution reverted')) {
-        // Generic revert — likely already acted
         const alreadyActed = action === 'support' ? 'supported' : 'challenged';
-        toast(`You have already ${alreadyActed} this report.`, { icon: action === 'support' ? '👍' : '⚡' });
+        toast(`You have already ${alreadyActed} this report.`, { id: `already-${report.id}` });
         setHasActed(action);
       } else {
         toast.error(`Failed to ${action}: ${msg}`);
