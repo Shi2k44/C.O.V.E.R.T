@@ -57,8 +57,6 @@ function App() {
           <Route path="/my-reports" element={<MySubmissions />} />
 
           {/* Legacy paths → unified dashboard */}
-          <Route path="/reviewer-dashboard" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/reviewer" element={<Navigate to="/dashboard" replace />} />
           <Route path="/moderator-dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/moderation" element={<Navigate to="/dashboard" replace />} />
           <Route path="/moderation/queue" element={<Navigate to="/dashboard" replace />} />

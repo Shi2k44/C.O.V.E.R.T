@@ -28,9 +28,9 @@ interface ReportCardProps {
 }
 
 const statusConfig: Record<ReportStatus, { label: string; color: string; icon: React.ElementType }> = {
-  // New lifecycle statuses
+  // Active lifecycle statuses
   pending_review: {
-    label: 'Pending Review',
+    label: 'Pending',
     color: 'bg-yellow-900/40 text-yellow-400',
     icon: ClockIcon,
   },
@@ -40,7 +40,7 @@ const statusConfig: Record<ReportStatus, { label: string; color: string; icon: R
     icon: ExclamationTriangleIcon,
   },
   rejected_by_reviewer: {
-    label: 'Rejected by Reviewer',
+    label: 'Rejected',
     color: 'bg-red-900/30 text-red-400',
     icon: XCircleIcon,
   },
@@ -102,9 +102,6 @@ const decisionLabelConfig: Record<string, { label: string; color: string }> = {
   DISPUTED: { label: 'Disputed', color: 'bg-orange-900/40 text-orange-400 border-orange-800/50' },
   NEEDS_EVIDENCE: { label: 'Needs Evidence', color: 'bg-amber-900/40 text-amber-400 border-amber-800/50' },
   FALSE_OR_MANIPULATED: { label: 'False / Manipulated', color: 'bg-red-900/40 text-red-400 border-red-800/50' },
-  // Reviewer decisions
-  REVIEW_PASSED: { label: 'Review Passed', color: 'bg-blue-900/40 text-blue-400 border-blue-800/50' },
-  REJECT_SPAM: { label: 'Rejected (Spam)', color: 'bg-red-900/30 text-red-400 border-red-800/50' },
 };
 
 const visibilityConfig: Record<ReportVisibility, { label: string; icon: React.ElementType }> = {

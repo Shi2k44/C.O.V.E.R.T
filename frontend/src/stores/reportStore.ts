@@ -296,7 +296,7 @@ export const useReportStore = create<ReportState>()(
       // v3: restore draft text-field persistence (files are never serialisable,
       //     but category/title/description/visibility survive page refresh).
       //     Draft is cleared programmatically on wallet disconnect + after submit.
-      name: 'covert-reports-v3',
+      name: 'covert-reports-v4',
       partialize: (state) => ({
         // Only persist the submitted reports list, active filters, and
         // the draft's text fields (so the user can navigate away and come back).

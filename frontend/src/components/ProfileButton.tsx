@@ -51,8 +51,7 @@ const TIER_CONFIG: Record<string, { label: string; color: string }> = {
 function BadgeLabel({ badges }: { badges: { type: BadgeType; active: boolean }[] }) {
   const activeBadges = badges.filter((b) => b.active);
   const roleBadge =
-    activeBadges.find((b) => b.type === BadgeType.MODERATOR_BADGE) ||
-    activeBadges.find((b) => b.type === BadgeType.REVIEWER_BADGE);
+    activeBadges.find((b) => b.type === BadgeType.MODERATOR_BADGE);
   const highestTier = activeBadges
     .filter((b) => b.type <= BadgeType.TIER_3_POWER)
     .sort((a, b) => b.type - a.type)[0];
