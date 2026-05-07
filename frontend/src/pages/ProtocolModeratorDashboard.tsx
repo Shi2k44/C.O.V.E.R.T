@@ -1061,7 +1061,10 @@ export function ProtocolModeratorDashboard() {
                                 )
                             );
                         }
-                    } catch { /* DB unreachable — dbFetched=true + empty set = show nothing */ }
+                    } catch {
+                        // DB unreachable — dbFetched=true + empty set = show nothing
+                        toast.error('Could not reach the database. Queue may appear empty — please refresh.');
+                    }
 
                     // Filter blockchain reports to those that exist in DB.
                     // If dbFetched is true but set is empty, DB has been wiped → show nothing.
@@ -1216,8 +1219,8 @@ export function ProtocolModeratorDashboard() {
     // Maps on-chain FinalLabel to the backend DB ReportStatus string
     const FINAL_LABEL_TO_STATUS: Record<number, string> = {
         [FinalLabel.CORROBORATED]: 'verified',
-        [FinalLabel.NEEDS_EVIDENCE]: 'under_review',
-        [FinalLabel.DISPUTED]: 'disputed',
+        [FinalLabel.NEEDS_EVIDENCE]: 'needs_evidence',
+        [FinalLabel.DISPUTED]: 'pending_moderation',
         [FinalLabel.FALSE_OR_MANIPULATED]: 'rejected',
     };
 

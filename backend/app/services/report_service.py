@@ -198,10 +198,15 @@ class ReportService:
         try:
             query = select(Report).where(Report.deleted_at.is_(None))
 
-            # Filter to only reports assigned to this moderator
+            # Filter to reports assigned to OR appealed to this moderator
             if moderator_wallet:
+                w = moderator_wallet.lower()
                 query = query.where(
-                    Report.assigned_moderator == moderator_wallet.lower()
+                    or_(
+                        Report.assigned_moderator == w,
+                        Report.appeal_mod_1 == w,
+                        Report.appeal_mod_2 == w,
+                    )
                 )
 
             if status:
